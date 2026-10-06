@@ -160,6 +160,10 @@
   .list-row:hover { background: var(--fill); }
   .list-row .grow { flex: 1; min-width: 0; }
   .list-row .sub { font-size: 12px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list-more { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 8px; border: 0; border-radius: 8px; background: none; color: var(--text2); font-size: 12px; cursor: pointer; }
+  .list-more:hover { background: var(--fill); color: var(--text); }
+  .list-more .i { width: 14px; height: 14px; transition: transform .2s; }
+  .list-more.open .i { transform: rotate(180deg); }
   .slot-badge { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; flex: none; background: var(--fill); font-weight: 700; text-transform: uppercase; }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; align-items: center; }
   .kv dt { color: var(--text2); }
@@ -360,6 +364,7 @@
     logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
     close: '<path d="M18 6 6 18M6 6l12 12"/>',
     github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>',
+    chevron: '<path d="m6 9 6 6 6-6"/>',
     book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
   };
   function icon(name) {
@@ -665,11 +670,14 @@
     const groups = h("div", { class: "groups" });
     const chart = h("div", { class: "card-bd chart" });
     const sideCard = h("div", { class: "card-bd list" });
+    const sideMeta = h("div", { class: "legend" });
+    let sideOpen = false;
+    let sideFleet = null;
     root.append(pageHeader("数据看板", seg), groups,
       h("div", { class: "dash-row" },
         h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "24 小时"),
           h("div", { class: "legend" }, h("span", {}, h("i", { style: "background:var(--primary)" }), "成功"), h("span", {}, h("i", { style: "background:var(--red)" }), "失败"))), chart),
-        h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, isAdmin() ? "渠道状态" : "接口信息")), sideCard)));
+        h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, isAdmin() ? "渠道状态" : "接口信息"), sideMeta), sideCard)));
 
     const load = async () => {
       const d = await api("GET", `/api/dashboard?scope=${dashScope}`);
@@ -708,17 +716,33 @@
           h("dt", {}, "文档"), h("dd", {}, h("a", { href: "#docs", style: "color:var(--primary)" }, "使用文档"))));
         return;
       }
-      const f = await api("GET", "/api/admin/fleet");
-      sideCard.replaceChildren(...Object.entries(f.slots).map(([slot, s]) => {
-        const st = workerState(s);
+      sideFleet = await api("GET", "/api/admin/fleet");
+      renderSide();
+    };
+    // 运行中的渠道直接显示(最多 4 个),未运行、禁用与多出的折叠
+    const renderSide = () => {
+      const slots = Object.entries(sideFleet.slots);
+      const up = slots.filter(([, s]) => s && !s.error && !s.disabled);
+      const active = up.reduce((n, [, s]) => n + ((s.health && s.health.active) || 0), 0);
+      const capacity = up.reduce((n, [, s]) => n + ((s.health && s.health.capacity) || 0), 0);
+      sideMeta.textContent = `${up.length} / ${slots.length} 在线 · ${active} / ${capacity} 并发`;
+      const row = ([slot, s]) => {
+        const st = s && s.disabled ? { color: "", text: "已禁用" } : workerState(s);
         const hl = s && s.health;
         return h("div", { class: "list-row" },
           h("div", { class: "slot-badge" }, slot),
-          h("div", { class: "grow" }, h("div", {}, hl ? `${hl.active} / ${hl.capacity} 并发` : "—"),
+          h("div", { class: "grow" }, h("div", {}, hl ? `${hl.active} / ${hl.capacity} 并发` : (s && s.name) || "—"),
             h("div", { class: "sub mono" }, hl && hl.worker ? hl.worker.split("/")[0] : (s && s.error) || "—")),
           s && !s.error ? latencyTag(s.latency) : null,
           dotTag(st.text, st.color));
-      }));
+      };
+      const shown = up.slice(0, 4);
+      const folded = slots.filter((x) => !shown.includes(x));
+      const rows = [...shown.map(row), ...(sideOpen ? folded.map(row) : [])];
+      if (!rows.length) rows.push(h("div", { class: "list-row" }, h("div", { class: "grow sub" }, "暂无在线渠道")));
+      if (folded.length) rows.push(h("button", { type: "button", class: `list-more${sideOpen ? " open" : ""}`,
+        onclick: () => { sideOpen = !sideOpen; renderSide(); } }, sideOpen ? "收起" : `展开其余 ${folded.length} 个`, icon("chevron")));
+      sideCard.replaceChildren(...rows);
     };
     await Promise.all([load(), loadSide()]);
     every(30, () => Promise.all([load(), loadSide()]));
@@ -1216,6 +1240,7 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
 
   // ---------------------------------------------------------------- 渠道(worker)
   function workerState(s) {
+    if (s && s.kind === "cnb" && s.error === "HTTP 530") return { color: "", text: "未运行" };
     if (!s || s.error) return { color: "red", text: "离线" };
     const phase = s.agent && s.agent.phase;
     if (phase === "draining" || phase === "drained") return { color: "orange", text: "下线中" };
