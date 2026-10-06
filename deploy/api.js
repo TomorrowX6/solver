@@ -329,14 +329,6 @@ const oauthCallback = (key) => async (c) => {
   return htmlRedirect("/admin#dashboard", [session["set-cookie"], clearOauthCookie]);
 };
 
-const oauthUnbind = (key) => async (c) => {
-  // 解绑后至少还要能用密码或另一种方式登录
-  const others = Object.keys(OAUTH).filter((k) => k !== key && c.user[`${k}_id`]);
-  check(c.user.password_hash || others.length, "请先设置密码，否则解绑后无法登录");
-  await c.env.DB.prepare(`UPDATE users SET ${key}_id = NULL, ${key}_login = NULL WHERE id = ?`).bind(c.user.id).run();
-  return ok();
-};
-
 // ------------------------------------------------------------------ 个人
 async function self(c) {
   return ok(publicUser(c.user));
@@ -805,7 +797,6 @@ const ROUTES = [
   ...Object.keys(OAUTH).flatMap((key) => [
     ["GET", `/api/oauth/${key}`, oauthStart(key), 0],
     ["GET", `/api/oauth/${key}/callback`, oauthCallback(key), 0],
-    ["POST", `/api/user/${key}/unbind`, oauthUnbind(key), ROLE.USER],
   ]),
   ["GET", "/api/user/self", self, ROLE.USER],
   ["PUT", "/api/user/password", changePassword, ROLE.USER],

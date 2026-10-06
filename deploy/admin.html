@@ -1233,16 +1233,8 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
   }
   const OAUTH_NAMES = { github: "GitHub", linuxdo: "LINUX DO" };
   function oauthCell(key) {
-    const name = OAUTH_NAMES[key];
     const login = me[`${key}_login`];
-    if (login) {
-      return h("span", { class: "toolbar", style: "gap:8px" }, tag(login, "blue"),
-        h("button", { class: "btn link danger", type: "button", onclick: () => confirmModal(`解绑 ${name}`, `解绑 ${login}?`, async () => {
-          await api("POST", `/api/user/${key}/unbind`, {});
-          toast("已解绑");
-          route();
-        }) }, "解绑"));
-    }
+    if (login) return tag(login, "blue");
     if (!sys[`${key}_oauth`]) return h("span", { class: "t3" }, "未启用");
     return h("a", { class: "btn sm", href: `/api/oauth/${key}?bind=1` }, icon(key), "绑定");
   }
