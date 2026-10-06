@@ -623,16 +623,25 @@ function installCommand(c, token) {
 async function listChannels(c) {
   const options = await getOptions(c.env);
   const cfg = cloudflareConfig(c, options);
-  const { results } = await c.env.DB.prepare("SELECT slot, name, host, status, install_token, created_at FROM channels ORDER BY slot").all();
+  const { results } = await c.env.DB.prepare("SELECT slot, name, host, status, concurrency, install_token, created_at FROM channels ORDER BY slot").all();
   return ok({
     cf_ready: Boolean(cfg.token && cfg.accountId && cfg.zone),
     items: results.map(({ install_token: token, ...ch }) => ({ ...ch, install_command: installCommand(c, token) })),
   });
 }
 
+// 并发数:0 表示自动(安装脚本按 CPU 与内存计算)
+function channelConcurrency(value) {
+  const n = toInt(value, 0);
+  check(n >= 0 && n <= 64, "并发数为 1–64,留空表示自动");
+  return n;
+}
+
 async function createChannel(c) {
-  const name = String((await body(c.request)).name || "").trim();
+  const input = await body(c.request);
+  const name = String(input.name || "").trim();
   check(name.length >= 1 && name.length <= 30, "名称为 1–30 个字符");
+  const concurrency = channelConcurrency(input.concurrency);
   const cfg = cloudflareConfig(c, await getOptions(c.env));
   check(cfg.token && cfg.accountId && cfg.zone, "请先在「系统设置」填写 Cloudflare API Token");
   const { results } = await c.env.DB.prepare("SELECT slot FROM channels").all();
@@ -648,14 +657,14 @@ async function createChannel(c) {
   const token = `ch-${randomString(40)}`;
   try {
     await c.env.DB.prepare(
-      "INSERT INTO channels (slot, name, host, tunnel_id, dns_record_id, install_token, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
-    ).bind(slot, name, tunnel.host, tunnel.tunnelId, tunnel.dnsRecordId, token, now()).run();
+      "INSERT INTO channels (slot, name, host, tunnel_id, dns_record_id, install_token, status, concurrency, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+    ).bind(slot, name, tunnel.host, tunnel.tunnelId, tunnel.dnsRecordId, token, concurrency, now()).run();
   } catch (err) {
     await deleteTunnel(cfg, tunnel.tunnelId, tunnel.dnsRecordId).catch(() => {});
     throw err;
   }
   forgetChannels();
-  return ok({ slot, name, host: tunnel.host, status: 1, install_command: installCommand(c, token) });
+  return ok({ slot, name, host: tunnel.host, status: 1, concurrency, install_command: installCommand(c, token) });
 }
 
 async function channelBySlot(c) {
@@ -671,7 +680,8 @@ async function updateChannel(c) {
   check(name.length >= 1 && name.length <= 30, "名称为 1–30 个字符");
   const status = "status" in input ? toInt(input.status) : ch.status;
   check([1, 2].includes(status), "状态无效");
-  await c.env.DB.prepare("UPDATE channels SET name = ?, status = ? WHERE slot = ?").bind(name, status, ch.slot).run();
+  const concurrency = "concurrency" in input ? channelConcurrency(input.concurrency) : ch.concurrency;
+  await c.env.DB.prepare("UPDATE channels SET name = ?, status = ?, concurrency = ? WHERE slot = ?").bind(name, status, concurrency, ch.slot).run();
   forgetChannels();
   return ok();
 }
@@ -727,6 +737,7 @@ async function channelConfig(c) {
     "TS_MAX_SESSIONS=4",
     "TS_SESSION_IDLE_TTL=1800",
   ];
+  if (ch.concurrency > 0) lines.push(`TS_MAX_CONCURRENCY=${ch.concurrency}`);
   return text(lines.join("\n") + "\n");
 }
 

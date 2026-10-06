@@ -1246,10 +1246,12 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
     const data = await api("GET", "/api/admin/channels");
     const add = h("button", { class: "btn primary", type: "button", disabled: !data.cf_ready, onclick: () => {
       const name = h("input", { class: "input", maxlength: 30, placeholder: "例如 香港-1" });
+      const conc = h("input", { class: "input", type: "number", min: 1, max: 64, step: 1, placeholder: "自动" });
       modal("添加服务器", h("div", { class: "form" }, field("名称", name),
+        field("并发数", conc, "同时求解的数量，留空则按服务器 CPU 与内存自动计算(4 核 8GB 约 10)"),
         h("span", { class: "hint" }, "将自动创建 Cloudflare 隧道和 solver-<位置>.000.moe 域名")), {
         onOk: async () => {
-          const r = await api("POST", "/api/admin/channels", { name: name.value.trim() });
+          const r = await api("POST", "/api/admin/channels", { name: name.value.trim(), concurrency: Number(conc.value) || 0 });
           await onChange();
           installModal(`安装 ${r.name}(${r.slot.toUpperCase()})`, r.install_command, r.slot, onChange);
         },
@@ -1263,10 +1265,23 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
         { title: "位置", render: (r) => h("div", { class: "slot-badge" }, r.slot) },
         { title: "名称", render: (r) => r.name },
         { title: "域名", render: (r) => h("span", { class: "mono" }, r.host) },
+        { title: "并发", render: (r) => (r.concurrency ? r.concurrency : tag("自动")) },
         { title: "状态", render: (r) => statusTag(r.status) },
         { title: "创建时间", render: (r) => fmtTime(r.created_at) },
         { title: "操作", render: (r) => h("div", { class: "ops" },
           h("button", { class: "btn link", type: "button", onclick: () => installModal(`安装 ${r.name}(${r.slot.toUpperCase()})`, r.install_command, r.slot, onChange) }, "安装命令"),
+          h("button", { class: "btn link", type: "button", onclick: () => {
+            const name = h("input", { class: "input", maxlength: 30, value: r.name });
+            const conc = h("input", { class: "input", type: "number", min: 1, max: 64, step: 1, placeholder: "自动", value: r.concurrency || "" });
+            modal(`编辑 ${r.slot.toUpperCase()}`, h("div", { class: "form" }, field("名称", name),
+              field("并发数", conc, "留空为自动。修改后在服务器上重新执行安装命令生效")), {
+              onOk: async () => {
+                await api("PUT", `/api/admin/channels/${r.slot}`, { name: name.value.trim(), concurrency: Number(conc.value) || 0 });
+                toast("已保存，在服务器上重新执行安装命令生效");
+                await onChange();
+              },
+            });
+          } }, "编辑"),
           h("button", { class: "btn link", type: "button", onclick: async () => { try { await api("PUT", `/api/admin/channels/${r.slot}`, { status: r.status === 1 ? 2 : 1 }); await onChange(); } catch (e) { toast(e.message, true); } } }, r.status === 1 ? "禁用" : "启用"),
           h("button", { class: "btn link danger", type: "button", onclick: () => confirmModal("删除服务器渠道", `删除「${r.name}」?同时删除它的 Cloudflare 隧道和域名，服务器上的程序会断开(可在服务器上执行 install.sh --uninstall 卸载)。`, async () => {
             const res = await api("DELETE", `/api/admin/channels/${r.slot}`);

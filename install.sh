@@ -7,7 +7,7 @@
 # 选项:
 #   -e, --endpoint URL     控制台地址,例如 https://solver.000.moe
 #   -t, --token TOKEN      控制台「渠道」页给出的安装令牌
-#   --concurrency N        同时求解数,默认按 CPU 与内存计算
+#   --concurrency N        同时求解数;默认用控制台为该渠道设置的值,未设置时按 CPU 与内存计算
 #   --image IMAGE          镜像,默认 ghcr.io/tomorrowx6/solver:latest
 #   --cn                   用阿里云镜像安装 Docker(国内服务器)
 #   --uninstall            停止并删除容器、镜像与配置
@@ -71,13 +71,17 @@ mkdir -p "$DIR"
 curl -fsS -H "Authorization: Bearer $TOKEN" "$ENDPOINT/api/channel/config" -o "$DIR/worker.env.tmp" \
   || die "下载配置失败:地址或安装令牌错误,或该渠道已在控制台删除"
 
-# 并发:每个浏览器约 0.45GB 内存,另留 1.5GB;4 核 8GB 约 10 个
+# 并发:命令行 --concurrency > 控制台设置 > 自动(每个浏览器约 0.45GB 内存,另留 1.5GB;4 核 8GB 约 10 个)
+configured=$(sed -n 's/^TS_MAX_CONCURRENCY=//p' "$DIR/worker.env.tmp")
+sed -i '/^TS_MAX_CONCURRENCY=/d' "$DIR/worker.env.tmp"
+[ -n "$CONCURRENCY" ] || CONCURRENCY="$configured"
 if [ -z "$CONCURRENCY" ]; then
   cores=$(nproc)
   mem_mb=$(awk '/MemTotal/ {print int($2 / 1024)}' /proc/meminfo)
   by_cpu=$(( cores * 5 / 2 ))
   by_mem=$(( (mem_mb - 1536) / 460 ))
   CONCURRENCY=$(( by_cpu < by_mem ? by_cpu : by_mem ))
+  [ "$CONCURRENCY" -le 32 ] || CONCURRENCY=32  # 自动计算的上限;需要更多时用 --concurrency 或在控制台指定
 fi
 [ "$CONCURRENCY" -ge 1 ] 2>/dev/null || CONCURRENCY=1
 {

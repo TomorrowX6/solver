@@ -122,7 +122,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/TomorrowX6/solver/main/insta
 ```
 
 脚本会按需安装 Docker,拉取镜像 `ghcr.io/tomorrowx6/solver`(GitHub Actions 构建,amd64 / arm64),
-按 CPU 与内存设定并发后启动容器(开机自启),并等待自检通过。重复执行即升级;`--uninstall` 卸载;
+按控制台为该渠道设置的并发数(未设置时按 CPU 与内存自动计算,最多 32;命令行 `--concurrency N` 优先)
+启动容器(开机自启),并等待自检通过。在控制台修改并发后,重新执行安装命令生效。重复执行即升级;`--uninstall` 卸载;
 国内服务器加 `--cn` 用阿里云镜像安装 Docker。服务器常驻运行,不参与 CNB 的轮换与扩缩;
 在控制台禁用渠道后不再分配新任务,删除渠道会同时删除它的隧道和域名。
 
