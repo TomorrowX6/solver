@@ -198,6 +198,7 @@
   .field-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; font-size: 13px; }
   .hint { font-weight: 400; font-size: 12px; color: var(--text3); }
   .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .stack { display: grid; gap: 16px; align-content: start; }
   .token-box { word-break: break-all; background: var(--fill); border-radius: 8px; padding: 12px; max-height: 220px; overflow: auto; }
   .big-num { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
@@ -1506,7 +1507,7 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
       h("div", { class: "field-row" }, "开放注册", reg.el),
       field("新用户赠送", gift, "积分"),
       save)),
-      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "GitHub 登录")),
+      h("div", { class: "stack" }, h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "GitHub 登录")),
         h("form", { class: "card-bd form", onsubmit: async (e) => {
           e.preventDefault();
           saveGithub.disabled = true;
@@ -1541,7 +1542,7 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
         } },
         field("Cloudflare API Token", cfToken,
           "用于给服务器自动创建隧道和域名。在 dash.cloudflare.com → 我的个人资料 → API 令牌 创建，权限：账户 · Cloudflare Tunnel · 编辑;区域 · DNS · 编辑;区域 · 区域 · 读取(区域选 000.moe)"),
-        saveCf))));
+        saveCf)))));
   }
 
   // ---------------------------------------------------------------- 启动
