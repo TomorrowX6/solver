@@ -58,6 +58,7 @@ export const OPTION_DEFAULTS = {
   register_password_enabled: "false",
   register_github_enabled: "false",
   register_linuxdo_enabled: "false",
+  oauth_only_enabled: "false", // 仅第三方登录:关闭密码登录与密码注册,登录页只显示 GitHub / LINUX DO
   new_user_quota: "0",
   solver_key: "", // worker 的 API Key(初始化时校验后保存;也可用 Worker 密钥 SOLVER_KEY 提供)
   v1_enabled: "true", // 5 秒盾(/v1)是否对用户令牌开放

@@ -496,9 +496,12 @@
     $("a-submit").textContent = { setup: "初始化", login: "登录", register: "注册" }[mode];
     const github = mode !== "setup" && sys && sys.github_oauth;
     const linuxdo = mode !== "setup" && sys && sys.linuxdo_oauth;
+    const oauthOnly = mode === "login" && sys && sys.oauth_only;
+    for (const id of ["a-user", "a-pass", "a-submit"]) $(id).hidden = oauthOnly;
+    $("a-user").required = $("a-pass").required = !oauthOnly;
     $("a-github").hidden = !github;
     $("a-linuxdo").hidden = !linuxdo;
-    $("a-or").hidden = !github && !linuxdo;
+    $("a-or").hidden = oauthOnly || (!github && !linuxdo);
     const sw = $("a-switch");
     sw.replaceChildren();
     if (mode === "login" && sys && sys.password_register) sw.append("没有账号?", h("a", { onclick: () => { authMode = "register"; renderAuth(); } }, "注册"));
@@ -1523,6 +1526,7 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
     const REGISTER_METHODS = [["password", "密码"], ["github", "GitHub"], ["linuxdo", "LINUX DO"]];
     const reg = Object.fromEntries(REGISTER_METHODS.map(([key]) => [key, switchInput(o[`register_${key}_enabled`] === "true")]));
     const v1On = switchInput(o.v1_enabled === "true");
+    const oauthOnlyOn = switchInput(o.oauth_only_enabled === "true");
     const cfToken = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: o.cf_api_token_set ? "已设置，留空不修改" : "" });
     const saveCf = h("button", { class: "btn primary", type: "submit" }, "保存");
     const save = h("button", { class: "btn primary", type: "submit" }, "保存");
@@ -1535,12 +1539,13 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
           try {
             const saved = await api("PUT", "/api/admin/option", {
               system_name: name.value.trim(), price_turnstile: Number(price.value), price_v1: Number(priceV1.value),
-              new_user_quota: Number(gift.value), v1_enabled: v1On.input.checked,
+              new_user_quota: Number(gift.value), v1_enabled: v1On.input.checked, oauth_only_enabled: oauthOnlyOn.input.checked,
               ...Object.fromEntries(REGISTER_METHODS.map(([key]) => [`register_${key}_enabled`, reg[key].input.checked])),
             });
             sys.system_name = saved.system_name;
             sys.price_turnstile = Number(saved.price_turnstile);
-            sys.password_register = saved.register_password_enabled === "true";
+            sys.oauth_only = saved.oauth_only_enabled === "true" && Boolean(sys.github_oauth || sys.linuxdo_oauth);
+            sys.password_register = saved.register_password_enabled === "true" && !sys.oauth_only;
             sys.v1_enabled = saved.v1_enabled === "true";
             setSystemName(saved.system_name);
             toast("已保存");
@@ -1553,6 +1558,8 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
         h("div", { class: "field" }, "开放注册",
           h("div", { class: "toggles" }, REGISTER_METHODS.map(([key, label]) => h("span", {}, label, reg[key].el))),
           h("span", { class: "hint" }, "关闭的方式不能注册新账号，已有账号仍可登录；GitHub 和 LINUX DO 还需在右侧启用登录")),
+        h("div", { class: "field-row" }, h("span", {}, "仅第三方登录",
+          h("div", { class: "hint" }, "登录页只显示 GitHub / LINUX DO 按钮，关闭密码登录和密码注册；开启前先在个人设置中绑定")), oauthOnlyOn.el),
         field("新用户赠送", gift, "积分"),
         save)),
         h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "服务器渠道")),

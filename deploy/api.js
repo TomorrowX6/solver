@@ -89,7 +89,8 @@ async function status(c) {
   return ok({
     system_name: options.system_name,
     setup_required: users.n === 0,
-    password_register: options.register_password_enabled === "true",
+    password_register: options.register_password_enabled === "true" && !oauthOnly(options),
+    oauth_only: oauthOnly(options),
     price_turnstile: intOption(options, "price_turnstile"),
     price_v1: intOption(options, "price_v1"),
     github_oauth: OAUTH.github.enabled(options),
@@ -124,6 +125,7 @@ async function setup(c) {
 async function login(c) {
   const { username, password } = await body(c.request);
   check(typeof username === "string" && typeof password === "string", "请填写用户名和密码");
+  if (oauthOnly(await getOptions(c.env))) return fail("已关闭密码登录，请使用第三方账号登录");
   const user = await c.env.DB.prepare("SELECT * FROM users WHERE username = ?").bind(username).first();
   if (!user) {
     await hashPassword(password); // 与存在的用户耗时一致
@@ -137,7 +139,7 @@ async function login(c) {
 
 async function register(c) {
   const options = await getOptions(c.env);
-  check(options.register_password_enabled === "true", "未开放注册");
+  check(options.register_password_enabled === "true" && !oauthOnly(options), "未开放注册");
   const { username, password } = await body(c.request);
   validCredentials(username, password);
   const taken = await c.env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(username).first();
@@ -228,6 +230,10 @@ const OAUTH = {
     },
   },
 };
+// 仅第三方登录:开关打开且至少启用了一种第三方登录时才生效(都没启用时退回密码登录,避免所有人都登不上)
+const oauthOnly = (o) => o.oauth_only_enabled === "true" && Object.values(OAUTH).some((p) => p.enabled(o));
+// 该用户能否用第三方登录:绑定了至少一种已启用的方式
+const canOauthLogin = (u, o) => Object.entries(OAUTH).some(([key, p]) => p.enabled(o) && u[`${key}_id`]);
 const oauthName = (u) => (Object.entries(OAUTH).find(([key]) => u[`${key}_id`]) || [null, { name: "第三方账号" }])[1].name;
 
 function htmlRedirect(target, cookies = []) {
@@ -645,6 +651,10 @@ async function updateOptions(c) {
       values[k] = String(n);
     }
   }
+  // 不允许把自己锁在外面:修改后仅第三方登录生效,而自己没有绑定任何已启用的方式
+  const before = await getOptions(c.env);
+  const lockedOut = (o) => oauthOnly(o) && !canOauthLogin(c.user, o);
+  check(!lockedOut({ ...before, ...values }) || lockedOut(before), "保存后你将无法登录：仅第三方登录需要你先在个人设置中绑定一种已启用的第三方账号");
   if (Object.keys(values).length) await setOptions(c.env, values);
   return getOptionList(c);
 }

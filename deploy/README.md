@@ -235,6 +235,10 @@ GitHub 登录:在 GitHub → Settings → Developer settings → OAuth Apps 新�
 LINUX DO 登录:在 connect.linux.do → 应用接入 → 申请接入新建应用,应用主页填 `https://solver.000.moe`,
 回调地址填 `https://solver.000.moe/api/oauth/linuxdo/callback`,最低等级在那里设置;再把 Client ID / Secret 填到控制台「系统设置」。
 
+开启「仅第三方登录」后若管理员无法登录(例如第三方应用失效),在本机关闭它即可恢复密码登录:
+`npx wrangler@4 d1 execute solver-db --remote --config deploy/wrangler.toml --command "DELETE FROM options WHERE key = 'oauth_only_enabled'"`
+(设置有 10 秒缓存)。
+
 初始化前(D1 中没有用户)Worker 只做分流,行为与之前相同。根密钥默认在初始化时校验后存入 D1;
 也可以改用 Worker 密钥 `SOLVER_KEY`(`npx wrangler@4 secret put SOLVER_KEY --config deploy/wrangler.toml`),两者都有时以密钥为准。
 
