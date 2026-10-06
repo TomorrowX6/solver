@@ -89,7 +89,7 @@ async function status(c) {
   return ok({
     system_name: options.system_name,
     setup_required: users.n === 0,
-    register_enabled: options.register_enabled === "true",
+    password_register: options.register_password_enabled === "true",
     price_turnstile: intOption(options, "price_turnstile"),
     price_v1: intOption(options, "price_v1"),
     github_oauth: OAUTH.github.enabled(options),
@@ -137,7 +137,7 @@ async function login(c) {
 
 async function register(c) {
   const options = await getOptions(c.env);
-  check(options.register_enabled === "true", "未开放注册");
+  check(options.register_password_enabled === "true", "未开放注册");
   const { username, password } = await body(c.request);
   validCredentials(username, password);
   const taken = await c.env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(username).first();
@@ -311,7 +311,7 @@ const oauthCallback = (key) => async (c) => {
 
   let user = owner;
   if (!user) {
-    if (options.register_enabled !== "true") return oauthError(`该 ${p.name} 账号未绑定用户：请用密码登录后在个人设置中绑定`);
+    if (options[`register_${key}_enabled`] !== "true") return oauthError(`该 ${p.name} 账号未绑定用户：请用密码登录后在个人设置中绑定`);
     const quota = intOption(options, "new_user_quota");
     user = await c.env.DB.prepare(
       `INSERT INTO users (username, password_hash, role, status, quota, created_at, ${idCol}, ${loginCol})
@@ -637,7 +637,7 @@ async function updateOptions(c) {
       const name = String(v).trim();
       check(name.length >= 1 && name.length <= 30, "系统名称为 1–30 个字符");
       values[k] = name;
-    } else if (["register_enabled", "github_oauth_enabled", "linuxdo_oauth_enabled", "v1_enabled"].includes(k)) {
+    } else if (k.endsWith("_enabled")) {
       values[k] = v === true || v === "true" ? "true" : "false";
     } else {
       const n = toInt(v, -1);

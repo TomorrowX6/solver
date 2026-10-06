@@ -197,6 +197,8 @@
   .field .input, .field .select { width: 100%; font-weight: 400; }
   .field-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; font-size: 13px; }
   .hint { font-weight: 400; font-size: 12px; color: var(--text3); }
+  .toggles { display: flex; flex-wrap: wrap; gap: 8px 24px; font-weight: 400; }
+  .toggles > span { display: inline-flex; align-items: center; gap: 8px; }
   .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
   .stack { display: grid; gap: 16px; align-content: start; }
   .token-box { word-break: break-all; background: var(--fill); border-radius: 8px; padding: 12px; max-height: 220px; overflow: auto; }
@@ -499,7 +501,7 @@
     $("a-or").hidden = !github && !linuxdo;
     const sw = $("a-switch");
     sw.replaceChildren();
-    if (mode === "login" && sys && sys.register_enabled) sw.append("没有账号?", h("a", { onclick: () => { authMode = "register"; renderAuth(); } }, "注册"));
+    if (mode === "login" && sys && sys.password_register) sw.append("没有账号?", h("a", { onclick: () => { authMode = "register"; renderAuth(); } }, "注册"));
     if (mode === "register") sw.append("已有账号?", h("a", { onclick: () => { authMode = "login"; renderAuth(); } }, "登录"));
   }
   function showAuth() {
@@ -1518,7 +1520,8 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
     const price = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.price_turnstile });
     const priceV1 = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.price_v1 });
     const gift = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.new_user_quota });
-    const reg = switchInput(o.register_enabled === "true");
+    const REGISTER_METHODS = [["password", "密码"], ["github", "GitHub"], ["linuxdo", "LINUX DO"]];
+    const reg = Object.fromEntries(REGISTER_METHODS.map(([key]) => [key, switchInput(o[`register_${key}_enabled`] === "true")]));
     const v1On = switchInput(o.v1_enabled === "true");
     const cfToken = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: o.cf_api_token_set ? "已设置，留空不修改" : "" });
     const saveCf = h("button", { class: "btn primary", type: "submit" }, "保存");
@@ -1532,11 +1535,12 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
           try {
             const saved = await api("PUT", "/api/admin/option", {
               system_name: name.value.trim(), price_turnstile: Number(price.value), price_v1: Number(priceV1.value),
-              new_user_quota: Number(gift.value), register_enabled: reg.input.checked, v1_enabled: v1On.input.checked,
+              new_user_quota: Number(gift.value), v1_enabled: v1On.input.checked,
+              ...Object.fromEntries(REGISTER_METHODS.map(([key]) => [`register_${key}_enabled`, reg[key].input.checked])),
             });
             sys.system_name = saved.system_name;
             sys.price_turnstile = Number(saved.price_turnstile);
-            sys.register_enabled = saved.register_enabled === "true";
+            sys.password_register = saved.register_password_enabled === "true";
             sys.v1_enabled = saved.v1_enabled === "true";
             setSystemName(saved.system_name);
             toast("已保存");
@@ -1546,7 +1550,9 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
         field("求解价格", price, "积分 / 次，成功才扣"),
         h("div", { class: "field-row" }, h("span", {}, "5 秒盾(/v1)", h("div", { class: "hint" }, "关闭后用户令牌不能调用 /v1，现有 API Key 不受影响")), v1On.el),
         field("5 秒盾价格", priceV1, "积分 / 次，成功才扣"),
-        h("div", { class: "field-row" }, "开放注册", reg.el),
+        h("div", { class: "field" }, "开放注册",
+          h("div", { class: "toggles" }, REGISTER_METHODS.map(([key, label]) => h("span", {}, label, reg[key].el))),
+          h("span", { class: "hint" }, "关闭的方式不能注册新账号，已有账号仍可登录；GitHub 和 LINUX DO 还需在右侧启用登录")),
         field("新用户赠送", gift, "积分"),
         save)),
         h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "服务器渠道")),
@@ -1564,8 +1570,8 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
             "用于给服务器自动创建隧道和域名。在 dash.cloudflare.com → 我的个人资料 → API 令牌 创建，权限：账户 · Cloudflare Tunnel · 编辑;区域 · DNS · 编辑;区域 · 区域 · 读取(区域选 000.moe)"),
           saveCf))),
       h("div", { class: "stack" },
-        oauthCard(o, "github", "在 GitHub → Settings → Developer settings → OAuth Apps 创建应用，回调地址填上面这个；开放注册时首次 GitHub 登录自动创建账号"),
-        oauthCard(o, "linuxdo", "在 connect.linux.do → 应用接入 → 申请接入创建应用，回调地址填上面这个，最低等级在那里设置；开放注册时首次 LINUX DO 登录自动创建账号"))));
+        oauthCard(o, "github", "在 GitHub → Settings → Developer settings → OAuth Apps 创建应用，回调地址填上面这个；开放 GitHub 注册时首次登录自动创建账号"),
+        oauthCard(o, "linuxdo", "在 connect.linux.do → 应用接入 → 申请接入创建应用，回调地址填上面这个，最低等级在那里设置；开放 LINUX DO 注册时首次登录自动创建账号"))));
   }
 
   // ---------------------------------------------------------------- 启动
