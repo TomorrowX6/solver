@@ -61,10 +61,13 @@ export const OPTION_DEFAULTS = {
   github_oauth_enabled: "false",
   github_client_id: "",
   github_client_secret: "",
+  linuxdo_oauth_enabled: "false",
+  linuxdo_client_id: "",
+  linuxdo_client_secret: "",
   cf_api_token: "", // 创建服务器渠道的隧道与 DNS 记录
 };
 // 不返回给前端的设置
-export const PRIVATE_OPTIONS = new Set(["solver_key", "scale_trigger_at", "github_client_secret", "cf_api_token"]);
+export const PRIVATE_OPTIONS = new Set(["solver_key", "scale_trigger_at", "github_client_secret", "linuxdo_client_secret", "cf_api_token"]);
 
 let optionCache = null;
 let optionCachedAt = 0;

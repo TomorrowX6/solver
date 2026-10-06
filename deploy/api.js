@@ -29,7 +29,7 @@ function publicUser(u) {
   return {
     id: u.id, username: u.username, role: u.role, status: u.status, quota: u.quota, used_quota: u.used_quota,
     request_count: u.request_count, created_at: u.created_at, last_login_at: u.last_login_at,
-    github_login: u.github_login || null, has_password: Boolean(u.password_hash),
+    github_login: u.github_login || null, linuxdo_login: u.linuxdo_login || null, has_password: Boolean(u.password_hash),
   };
 }
 
@@ -92,7 +92,8 @@ async function status(c) {
     register_enabled: options.register_enabled === "true",
     price_turnstile: intOption(options, "price_turnstile"),
     price_v1: intOption(options, "price_v1"),
-    github_oauth: githubEnabled(options),
+    github_oauth: OAUTH.github.enabled(options),
+    linuxdo_oauth: OAUTH.linuxdo.enabled(options),
     v1_enabled: options.v1_enabled === "true",
   });
 }
@@ -128,7 +129,7 @@ async function login(c) {
     await hashPassword(password); // 与存在的用户耗时一致
     return fail("用户名或密码错误");
   }
-  if (!user.password_hash) return fail("该账号使用 GitHub 登录");
+  if (!user.password_hash) return fail(`该账号使用 ${oauthName(user)} 登录`);
   if (!(await verifyPassword(password, user.password_hash))) return fail("用户名或密码错误");
   if (user.status !== 1) return fail("账号已禁用");
   return ok(publicUser(user), await startSession(c.env, user));
@@ -155,11 +156,79 @@ async function logout(c) {
   return ok(null, clearCookie);
 }
 
-// ------------------------------------------------------------------ GitHub 登录
-// 流程:/api/oauth/github 生成 state(存 D1,并写入 SameSite=Lax 的 Cookie)后跳到 GitHub;
-// 回调时 state 必须与 Cookie 一致且未过期,防止伪造登录。绑定流程把发起者记在 state 里,回调时不依赖会话 Cookie
-// (会话 Cookie 是 SameSite=Strict,从 GitHub 跳回时不会携带)。
-const githubEnabled = (o) => o.github_oauth_enabled === "true" && Boolean(o.github_client_id && o.github_client_secret);
+// ------------------------------------------------------------------ 第三方登录(GitHub、LINUX DO)
+// 流程:/api/oauth/<方式> 生成 state(存 D1,并写入 SameSite=Lax 的 Cookie)后跳到授权页;
+// 回调时 state 必须与 Cookie 一致、未过期且属于同一登录方式,防止伪造登录。绑定流程把发起者记在 state 里,
+// 回调时不依赖会话 Cookie(会话 Cookie 是 SameSite=Strict,从授权页跳回时不会携带)。
+// 每种方式在 users 表上有 <key>_id 与 <key>_login 两列(key 只取自下表,不来自请求)。
+const callbackUrl = (c, key) => `${c.url.origin}/api/oauth/${key}/callback`;
+
+const OAUTH = {
+  github: {
+    name: "GitHub",
+    prefix: "gh",
+    enabled: (o) => o.github_oauth_enabled === "true" && Boolean(o.github_client_id && o.github_client_secret),
+    authorizeUrl(c, o, state) {
+      const url = new URL("/login/oauth/authorize", c.env.GITHUB_BASE || "https://github.com");
+      url.searchParams.set("client_id", o.github_client_id);
+      url.searchParams.set("redirect_uri", callbackUrl(c, "github"));
+      url.searchParams.set("scope", "read:user");
+      url.searchParams.set("state", state);
+      return url;
+    },
+    async fetchUser(c, o, code) {
+      const ua = { "user-agent": "turnstile-solver" };
+      const tokenResp = await fetch(new URL("/login/oauth/access_token", c.env.GITHUB_BASE || "https://github.com"), {
+        method: "POST",
+        headers: { ...ua, accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({
+          client_id: o.github_client_id, client_secret: o.github_client_secret, code, redirect_uri: callbackUrl(c, "github"),
+        }),
+      });
+      const token = await tokenResp.json().catch(() => ({}));
+      if (!token.access_token) return null;
+      const userResp = await fetch(new URL("/user", c.env.GITHUB_API || "https://api.github.com"), {
+        headers: { ...ua, accept: "application/vnd.github+json", authorization: `Bearer ${token.access_token}` },
+      });
+      const gh = await userResp.json().catch(() => ({}));
+      return gh && gh.id ? { id: String(gh.id), login: String(gh.login || gh.id) } : null;
+    },
+  },
+  // https://connect.linux.do/.well-known/openid-configuration;最低信任等级在 Connect 的应用设置里限制
+  linuxdo: {
+    name: "LINUX DO",
+    prefix: "ld",
+    enabled: (o) => o.linuxdo_oauth_enabled === "true" && Boolean(o.linuxdo_client_id && o.linuxdo_client_secret),
+    authorizeUrl(c, o, state) {
+      const url = new URL("/oauth2/authorize", c.env.LINUXDO_BASE || "https://connect.linux.do");
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("client_id", o.linuxdo_client_id);
+      url.searchParams.set("redirect_uri", callbackUrl(c, "linuxdo"));
+      url.searchParams.set("state", state);
+      return url;
+    },
+    async fetchUser(c, o, code) {
+      const base = c.env.LINUXDO_BASE || "https://connect.linux.do";
+      const tokenResp = await fetch(new URL("/oauth2/token", base), {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded",
+          authorization: `Basic ${btoa(`${o.linuxdo_client_id}:${o.linuxdo_client_secret}`)}`,
+        },
+        body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: callbackUrl(c, "linuxdo") }),
+      });
+      const token = await tokenResp.json().catch(() => ({}));
+      if (!token.access_token) return null;
+      const userResp = await fetch(new URL("/api/user", base), {
+        headers: { accept: "application/json", authorization: `Bearer ${token.access_token}` },
+      });
+      const ld = await userResp.json().catch(() => ({}));
+      return ld && ld.id ? { id: String(ld.id), login: String(ld.username || ld.id) } : null;
+    },
+  },
+};
+const oauthName = (u) => (Object.entries(OAUTH).find(([key]) => u[`${key}_id`]) || [null, { name: "第三方账号" }])[1].name;
 
 function htmlRedirect(target, cookies = []) {
   // 用页面内跳转而不是 302:由本站页面发起的导航会带上 SameSite=Strict 的会话 Cookie
@@ -176,9 +245,10 @@ function htmlRedirect(target, cookies = []) {
 const clearOauthCookie = `${OAUTH_COOKIE}=; Path=/api/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 const oauthError = (message) => htmlRedirect(`/admin#oauth_error=${encodeURIComponent(message)}`, [clearOauthCookie]);
 
-async function githubStart(c) {
+const oauthStart = (key) => async (c) => {
+  const p = OAUTH[key];
   const options = await getOptions(c.env);
-  if (!githubEnabled(options)) return oauthError("未启用 GitHub 登录");
+  if (!p.enabled(options)) return oauthError(`未启用 ${p.name} 登录`);
   let userId = null;
   if (c.url.searchParams.get("bind")) {
     const user = await sessionUser(c.request, c.env);
@@ -186,103 +256,86 @@ async function githubStart(c) {
     userId = user.id;
   }
   const state = randomString(32);
-  await c.env.DB.prepare("INSERT INTO oauth_states (state, user_id, expires_at) VALUES (?, ?, ?)").bind(state, userId, now() + 600).run();
-  const authorize = new URL("/login/oauth/authorize", c.env.GITHUB_BASE || "https://github.com");
-  authorize.searchParams.set("client_id", options.github_client_id);
-  authorize.searchParams.set("redirect_uri", `${c.url.origin}/api/oauth/github/callback`);
-  authorize.searchParams.set("scope", "read:user");
-  authorize.searchParams.set("state", state);
+  await c.env.DB.prepare("INSERT INTO oauth_states (state, user_id, provider, expires_at) VALUES (?, ?, ?, ?)")
+    .bind(state, userId, key, now() + 600).run();
   return new Response(null, {
     status: 302,
     headers: {
-      location: authorize.toString(),
+      location: p.authorizeUrl(c, options, state).toString(),
       "cache-control": "no-store",
       "set-cookie": `${OAUTH_COOKIE}=${state}; Path=/api/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
     },
   });
-}
+};
 
-async function githubUser(c, options, code) {
-  const ua = { "user-agent": "turnstile-solver" };
-  const tokenResp = await fetch(new URL("/login/oauth/access_token", c.env.GITHUB_BASE || "https://github.com"), {
-    method: "POST",
-    headers: { ...ua, accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({
-      client_id: options.github_client_id,
-      client_secret: options.github_client_secret,
-      code,
-      redirect_uri: `${c.url.origin}/api/oauth/github/callback`,
-    }),
-  });
-  const token = await tokenResp.json().catch(() => ({}));
-  if (!token.access_token) return null;
-  const userResp = await fetch(new URL("/user", c.env.GITHUB_API || "https://api.github.com"), {
-    headers: { ...ua, accept: "application/vnd.github+json", authorization: `Bearer ${token.access_token}` },
-  });
-  const gh = await userResp.json().catch(() => ({}));
-  return gh && gh.id ? { id: String(gh.id), login: String(gh.login || gh.id) } : null;
-}
-
-async function uniqueUsername(env, login) {
+async function uniqueUsername(env, login, prefix) {
   let base = login.replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 20);
-  if (base.length < 3) base = `gh_${base}`.slice(0, 20);
+  if (base.length < 3) base = `${prefix}_${base}`.slice(0, 20);
   for (let i = 0; i < 5; i++) {
     const name = i === 0 ? base : `${base.slice(0, 15)}_${randomString(4).toLowerCase()}`;
     if (!(await env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(name).first())) return name;
   }
-  return `gh_${randomString(12).toLowerCase()}`;
+  return `${prefix}_${randomString(12).toLowerCase()}`;
 }
 
-async function githubCallback(c) {
+const oauthCallback = (key) => async (c) => {
+  const p = OAUTH[key];
   const q = c.url.searchParams;
-  if (q.get("error")) return oauthError("已取消 GitHub 授权");
+  if (q.get("error")) return oauthError(`已取消 ${p.name} 授权`);
   const state = q.get("state") || "";
   const cookieState = cookie(c.request, OAUTH_COOKIE);
   if (!state || !cookieState || !safeEqual(state, cookieState)) return oauthError("登录已失效，请重试");
-  const pending = await c.env.DB.prepare("DELETE FROM oauth_states WHERE state = ? AND expires_at > ? RETURNING user_id")
+  const pending = await c.env.DB.prepare("DELETE FROM oauth_states WHERE state = ? AND expires_at > ? RETURNING user_id, provider")
     .bind(state, now()).first();
-  if (!pending) return oauthError("登录已失效，请重试");
+  if (!pending || (pending.provider || "github") !== key) return oauthError("登录已失效，请重试");
   const options = await getOptions(c.env);
-  if (!githubEnabled(options)) return oauthError("未启用 GitHub 登录");
-  let gh = null;
+  if (!p.enabled(options)) return oauthError(`未启用 ${p.name} 登录`);
+  let account = null;
   try {
-    gh = await githubUser(c, options, q.get("code") || "");
+    account = await p.fetchUser(c, options, q.get("code") || "");
   } catch (err) {
-    console.error("github oauth", err);
-    return oauthError("连接 GitHub 失败，请重试");
+    console.error(`${key} oauth`, err);
+    return oauthError(`连接 ${p.name} 失败，请重试`);
   }
-  if (!gh) return oauthError("GitHub 授权失败，请重试");
+  if (!account) return oauthError(`${p.name} 授权失败，请重试`);
 
-  const owner = await c.env.DB.prepare("SELECT * FROM users WHERE github_id = ?").bind(gh.id).first();
+  const idCol = `${key}_id`;
+  const loginCol = `${key}_login`;
+  const owner = await c.env.DB.prepare(`SELECT * FROM users WHERE ${idCol} = ?`).bind(account.id).first();
   if (pending.user_id) {
     // 绑定到发起绑定的账号
-    if (owner && owner.id !== pending.user_id) return oauthError("该 GitHub 账号已绑定其他用户");
-    await c.env.DB.prepare("UPDATE users SET github_id = ?, github_login = ? WHERE id = ?").bind(gh.id, gh.login, pending.user_id).run();
+    if (owner && owner.id !== pending.user_id) return oauthError(`该 ${p.name} 账号已绑定其他用户`);
+    await c.env.DB.prepare(`UPDATE users SET ${idCol} = ?, ${loginCol} = ? WHERE id = ?`).bind(account.id, account.login, pending.user_id).run();
     return htmlRedirect("/admin#personal", [clearOauthCookie]);
   }
 
   let user = owner;
   if (!user) {
-    if (options.register_enabled !== "true") return oauthError("该 GitHub 账号未绑定用户：请用密码登录后在个人设置中绑定");
+    if (options.register_enabled !== "true") return oauthError(`该 ${p.name} 账号未绑定用户：请用密码登录后在个人设置中绑定`);
     const quota = intOption(options, "new_user_quota");
     user = await c.env.DB.prepare(
-      `INSERT INTO users (username, password_hash, role, status, quota, created_at, github_id, github_login)
+      `INSERT INTO users (username, password_hash, role, status, quota, created_at, ${idCol}, ${loginCol})
        VALUES (?, '', ?, 1, ?, ?, ?, ?) RETURNING *`,
-    ).bind(await uniqueUsername(c.env, gh.login), ROLE.USER, quota, now(), gh.id, gh.login).first();
-    await addLog(c.env, { userId: user.id, username: user.username, type: LOG.SYSTEM, content: quota ? `GitHub 注册赠送 ${quota} 积分` : "GitHub 注册", quota });
-  } else if (user.github_login !== gh.login) {
-    await c.env.DB.prepare("UPDATE users SET github_login = ? WHERE id = ?").bind(gh.login, user.id).run();
+    ).bind(await uniqueUsername(c.env, account.login, p.prefix), ROLE.USER, quota, now(), account.id, account.login).first();
+    await addLog(c.env, {
+      userId: user.id, username: user.username, type: LOG.SYSTEM, quota,
+      content: quota ? `${p.name} 注册赠送 ${quota} 积分` : `${p.name} 注册`,
+    });
+  } else if (user[loginCol] !== account.login) {
+    await c.env.DB.prepare(`UPDATE users SET ${loginCol} = ? WHERE id = ?`).bind(account.login, user.id).run();
   }
   if (user.status !== 1) return oauthError("账号已禁用");
   const session = await startSession(c.env, user);
   return htmlRedirect("/admin#dashboard", [session["set-cookie"], clearOauthCookie]);
-}
+};
 
-async function githubUnbind(c) {
-  check(c.user.password_hash, "请先设置密码，否则解绑后无法登录");
-  await c.env.DB.prepare("UPDATE users SET github_id = NULL, github_login = NULL WHERE id = ?").bind(c.user.id).run();
+const oauthUnbind = (key) => async (c) => {
+  // 解绑后至少还要能用密码或另一种方式登录
+  const others = Object.keys(OAUTH).filter((k) => k !== key && c.user[`${k}_id`]);
+  check(c.user.password_hash || others.length, "请先设置密码，否则解绑后无法登录");
+  await c.env.DB.prepare(`UPDATE users SET ${key}_id = NULL, ${key}_login = NULL WHERE id = ?`).bind(c.user.id).run();
   return ok();
-}
+};
 
 // ------------------------------------------------------------------ 个人
 async function self(c) {
@@ -291,7 +344,7 @@ async function self(c) {
 
 async function changePassword(c) {
   const { old_password: oldPassword, password } = await body(c.request);
-  // 通过 GitHub 创建的账号没有密码,首次设置不需要原密码
+  // 通过第三方登录创建的账号没有密码,首次设置不需要原密码
   if (c.user.password_hash) check(await verifyPassword(String(oldPassword || ""), c.user.password_hash), "原密码错误");
   validCredentials(c.user.username, password);
   await c.env.DB.batch([
@@ -571,6 +624,7 @@ async function getOptionList(c) {
   const options = await getOptions(c.env);
   const visible = Object.fromEntries(Object.entries(options).filter(([k]) => !PRIVATE_OPTIONS.has(k)));
   visible.github_client_secret_set = Boolean(options.github_client_secret);
+  visible.linuxdo_client_secret_set = Boolean(options.linuxdo_client_secret);
   visible.cf_api_token_set = Boolean(options.cf_api_token);
   return ok(visible);
 }
@@ -579,19 +633,19 @@ async function updateOptions(c) {
   const input = await body(c.request);
   const values = {};
   for (const [k, v] of Object.entries(input)) {
-    if (k === "github_client_secret" || k === "cf_api_token") {
+    if (k === "github_client_secret" || k === "linuxdo_client_secret" || k === "cf_api_token") {
       // 只写:留空表示不修改
       if (String(v || "").trim()) values[k] = String(v).trim();
       continue;
     }
     check(k in OPTION_DEFAULTS && !PRIVATE_OPTIONS.has(k), `未知设置 ${k}`);
-    if (k === "github_client_id") {
+    if (k === "github_client_id" || k === "linuxdo_client_id") {
       values[k] = String(v || "").trim().slice(0, 100);
     } else if (k === "system_name") {
       const name = String(v).trim();
       check(name.length >= 1 && name.length <= 30, "系统名称为 1–30 个字符");
       values[k] = name;
-    } else if (k === "register_enabled" || k === "github_oauth_enabled" || k === "v1_enabled") {
+    } else if (["register_enabled", "github_oauth_enabled", "linuxdo_oauth_enabled", "v1_enabled"].includes(k)) {
       values[k] = v === true || v === "true" ? "true" : "false";
     } else {
       const n = toInt(v, -1);
@@ -748,9 +802,11 @@ const ROUTES = [
   ["POST", "/api/user/login", login, 0],
   ["POST", "/api/user/register", register, 0],
   ["POST", "/api/user/logout", logout, 0],
-  ["GET", "/api/oauth/github", githubStart, 0],
-  ["GET", "/api/oauth/github/callback", githubCallback, 0],
-  ["POST", "/api/user/github/unbind", githubUnbind, ROLE.USER],
+  ...Object.keys(OAUTH).flatMap((key) => [
+    ["GET", `/api/oauth/${key}`, oauthStart(key), 0],
+    ["GET", `/api/oauth/${key}/callback`, oauthCallback(key), 0],
+    ["POST", `/api/user/${key}/unbind`, oauthUnbind(key), ROLE.USER],
+  ]),
   ["GET", "/api/user/self", self, ROLE.USER],
   ["PUT", "/api/user/password", changePassword, ROLE.USER],
   ["GET", "/api/dashboard", dashboard, ROLE.USER],

@@ -232,6 +232,9 @@ GitHub 上的历史与 CNB 独立,更新时用 `scripts/publish-github.sh "说�
 GitHub 登录:在 GitHub → Settings → Developer settings → OAuth Apps 新建应用,Homepage 填 `https://solver.000.moe`,
 回调地址填 `https://solver.000.moe/api/oauth/github/callback`,再把 Client ID / Secret 填到控制台「系统设置」。
 
+LINUX DO 登录:在 connect.linux.do → 应用接入 → 申请接入新建应用,应用主页填 `https://solver.000.moe`,
+回调地址填 `https://solver.000.moe/api/oauth/linuxdo/callback`,最低等级在那里设置;再把 Client ID / Secret 填到控制台「系统设置」。
+
 初始化前(D1 中没有用户)Worker 只做分流,行为与之前相同。根密钥默认在初始化时校验后存入 D1;
 也可以改用 Worker 密钥 `SOLVER_KEY`(`npx wrangler@4 secret put SOLVER_KEY --config deploy/wrangler.toml`),两者都有时以密钥为准。
 

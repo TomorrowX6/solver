@@ -271,6 +271,7 @@
       <button class="btn primary" type="submit" id="a-submit">登录</button>
       <div class="divider" id="a-or" hidden>或</div>
       <a class="btn" id="a-github" href="/api/oauth/github" hidden><span data-icon="github"></span>使用 GitHub 登录</a>
+      <a class="btn" id="a-linuxdo" href="/api/oauth/linuxdo" hidden><span data-icon="linuxdo"></span>使用 LINUX DO 登录</a>
       <div class="switch-line" id="a-switch"></div>
       <div class="switch-line"><a href="#docs">使用文档</a></div>
     </form>
@@ -366,6 +367,7 @@
     close: '<path d="M18 6 6 18M6 6l12 12"/>',
     github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>',
     chevron: '<path d="m6 9 6 6 6-6"/>',
+    linuxdo: '<path fill="#1c1c1e" stroke="none" d="M2.57 8.67A10 10 0 0 1 21.43 8.67Z"/><path fill="#f0f0f0" stroke="none" d="M2.57 8.67H21.43A10 10 0 0 1 21.43 15.33H2.57A10 10 0 0 1 2.57 8.67Z"/><path fill="#ffb003" stroke="none" d="M2.57 15.33A10 10 0 0 0 21.43 15.33Z"/><circle cx="12" cy="12" r="10" stroke-width="1" stroke-opacity=".25"/>',
     book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
   };
   function icon(name) {
@@ -491,8 +493,10 @@
     $("a-pass").autocomplete = mode === "login" ? "current-password" : "new-password";
     $("a-submit").textContent = { setup: "初始化", login: "登录", register: "注册" }[mode];
     const github = mode !== "setup" && sys && sys.github_oauth;
+    const linuxdo = mode !== "setup" && sys && sys.linuxdo_oauth;
     $("a-github").hidden = !github;
-    $("a-or").hidden = !github;
+    $("a-linuxdo").hidden = !linuxdo;
+    $("a-or").hidden = !github && !linuxdo;
     const sw = $("a-switch");
     sw.replaceChildren();
     if (mode === "login" && sys && sys.register_enabled) sw.append("没有账号?", h("a", { onclick: () => { authMode = "register"; renderAuth(); } }, "注册"));
@@ -1212,7 +1216,8 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
           h("dt", {}, "角色"), h("dd", {}, tag(roleName, roleColor)),
           h("dt", {}, "注册时间"), h("dd", {}, fmtTime(me.created_at)),
           h("dt", {}, "最后登录"), h("dd", {}, fmtTime(me.last_login_at)),
-          h("dt", {}, "GitHub"), h("dd", {}, githubCell()))),
+          h("dt", {}, "GitHub"), h("dd", {}, oauthCell("github")),
+          h("dt", {}, "LINUX DO"), h("dd", {}, oauthCell("linuxdo")))),
       h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, me.has_password ? "修改密码" : "设置密码")),
         h("form", { class: "card-bd form", onsubmit: async (e) => {
           e.preventDefault();
@@ -1226,17 +1231,20 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
           } catch (err) { toast(err.message, true); } finally { save.disabled = false; }
         } }, me.has_password ? field("原密码", oldPass) : null, field("新密码", newPass, "8–64 位"), field("确认新密码", again), save))));
   }
-  function githubCell() {
-    if (me.github_login) {
-      return h("span", { class: "toolbar", style: "gap:8px" }, tag(me.github_login, "blue"),
-        h("button", { class: "btn link danger", type: "button", onclick: () => confirmModal("解绑 GitHub", `解绑 ${me.github_login}?`, async () => {
-          await api("POST", "/api/user/github/unbind", {});
+  const OAUTH_NAMES = { github: "GitHub", linuxdo: "LINUX DO" };
+  function oauthCell(key) {
+    const name = OAUTH_NAMES[key];
+    const login = me[`${key}_login`];
+    if (login) {
+      return h("span", { class: "toolbar", style: "gap:8px" }, tag(login, "blue"),
+        h("button", { class: "btn link danger", type: "button", onclick: () => confirmModal(`解绑 ${name}`, `解绑 ${login}?`, async () => {
+          await api("POST", `/api/user/${key}/unbind`, {});
           toast("已解绑");
           route();
         }) }, "解绑"));
     }
-    if (!sys.github_oauth) return h("span", { class: "t3" }, "未启用");
-    return h("a", { class: "btn sm", href: "/api/oauth/github?bind=1" }, icon("github"), "绑定");
+    if (!sys[`${key}_oauth`]) return h("span", { class: "t3" }, "未启用");
+    return h("a", { class: "btn sm", href: `/api/oauth/${key}?bind=1` }, icon(key), "绑定");
   }
 
   // ---------------------------------------------------------------- 渠道(worker)
@@ -1425,6 +1433,7 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
       { title: "ID", render: (u) => u.id },
       { title: "用户名", render: (u) => u.username },
       { title: "GitHub", render: (u) => u.github_login || "—" },
+      { title: "LINUX DO", render: (u) => u.linuxdo_login || "—" },
       { title: "角色", render: (u) => { const [n, c] = ROLE_TAG[u.role] || ["用户", ""]; return tag(n, c); } },
       { title: "状态", render: (u) => statusTag(u.status) },
       { title: "余额", num: true, render: (u) => num(u.quota) },
@@ -1479,6 +1488,38 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
   }
 
   // ---------------------------------------------------------------- 系统设置
+  // 第三方登录设置卡片:启用、Client ID、Client Secret(只写)、回调地址
+  function oauthCard(o, key, hint) {
+    const name = OAUTH_NAMES[key];
+    const on = switchInput(o[`${key}_oauth_enabled`] === "true");
+    const id = h("input", { class: "input mono", value: o[`${key}_client_id`], autocomplete: "off" });
+    const secret = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: o[`${key}_client_secret_set`] ? "已设置，留空不修改" : "" });
+    const callback = `${location.origin}/api/oauth/${key}/callback`;
+    const save = h("button", { class: "btn primary", type: "submit" }, "保存");
+    return h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, `${name} 登录`)),
+      h("form", { class: "card-bd form", onsubmit: async (e) => {
+        e.preventDefault();
+        save.disabled = true;
+        try {
+          const saved = await api("PUT", "/api/admin/option", {
+            [`${key}_oauth_enabled`]: on.input.checked, [`${key}_client_id`]: id.value.trim(), [`${key}_client_secret`]: secret.value,
+          });
+          secret.value = "";
+          secret.placeholder = saved[`${key}_client_secret_set`] ? "已设置，留空不修改" : "";
+          sys[`${key}_oauth`] = saved[`${key}_oauth_enabled`] === "true" && Boolean(saved[`${key}_client_id`]) && saved[`${key}_client_secret_set`];
+          toast("已保存");
+        } catch (err) { toast(err.message, true); } finally { save.disabled = false; }
+      } },
+      h("div", { class: "field-row" }, "启用", on.el),
+      field("Client ID", id),
+      field("Client Secret", secret),
+      h("div", { class: "field" }, "回调地址",
+        h("span", { class: "key-cell" }, h("span", { class: "mono t2" }, callback),
+          h("button", { class: "btn icon", type: "button", title: "复制", onclick: () => copyText(callback) }, icon("copy"))),
+        h("span", { class: "hint" }, hint)),
+      save));
+  }
+
   async function pageSettings(root) {
     const o = await api("GET", "/api/admin/option");
     const name = h("input", { class: "input", value: o.system_name, maxlength: 30 });
@@ -1487,75 +1528,52 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
     const gift = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.new_user_quota });
     const reg = switchInput(o.register_enabled === "true");
     const v1On = switchInput(o.v1_enabled === "true");
-    const ghOn = switchInput(o.github_oauth_enabled === "true");
-    const ghId = h("input", { class: "input mono", value: o.github_client_id, autocomplete: "off" });
-    const ghSecret = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: o.github_client_secret_set ? "已设置，留空不修改" : "" });
-    const callback = `${location.origin}/api/oauth/github/callback`;
     const cfToken = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: o.cf_api_token_set ? "已设置，留空不修改" : "" });
     const saveCf = h("button", { class: "btn primary", type: "submit" }, "保存");
     const save = h("button", { class: "btn primary", type: "submit" }, "保存");
-    const saveGithub = h("button", { class: "btn primary", type: "submit" }, "保存");
-    root.append(pageHeader("系统设置"), h("div", { class: "two" }, h("div", { class: "card" },
-      h("div", { class: "card-hd" }, h("h3", {}, "基础")),
-      h("form", { class: "card-bd form", onsubmit: async (e) => {
-        e.preventDefault();
-        save.disabled = true;
-        try {
-          const saved = await api("PUT", "/api/admin/option", {
-            system_name: name.value.trim(), price_turnstile: Number(price.value), price_v1: Number(priceV1.value),
-            new_user_quota: Number(gift.value), register_enabled: reg.input.checked, v1_enabled: v1On.input.checked,
-          });
-          sys.system_name = saved.system_name;
-          sys.price_turnstile = Number(saved.price_turnstile);
-          sys.register_enabled = saved.register_enabled === "true";
-          sys.v1_enabled = saved.v1_enabled === "true";
-          setSystemName(saved.system_name);
-          toast("已保存");
-        } catch (err) { toast(err.message, true); } finally { save.disabled = false; }
-      } },
-      field("系统名称", name),
-      field("求解价格", price, "积分 / 次，成功才扣"),
-      h("div", { class: "field-row" }, h("span", {}, "5 秒盾(/v1)", h("div", { class: "hint" }, "关闭后用户令牌不能调用 /v1，现有 API Key 不受影响")), v1On.el),
-      field("5 秒盾价格", priceV1, "积分 / 次，成功才扣"),
-      h("div", { class: "field-row" }, "开放注册", reg.el),
-      field("新用户赠送", gift, "积分"),
-      save)),
-      h("div", { class: "stack" }, h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "GitHub 登录")),
+    root.append(pageHeader("系统设置"), h("div", { class: "two" },
+      h("div", { class: "stack" }, h("div", { class: "card" },
+        h("div", { class: "card-hd" }, h("h3", {}, "基础")),
         h("form", { class: "card-bd form", onsubmit: async (e) => {
           e.preventDefault();
-          saveGithub.disabled = true;
+          save.disabled = true;
           try {
             const saved = await api("PUT", "/api/admin/option", {
-              github_oauth_enabled: ghOn.input.checked, github_client_id: ghId.value.trim(), github_client_secret: ghSecret.value,
+              system_name: name.value.trim(), price_turnstile: Number(price.value), price_v1: Number(priceV1.value),
+              new_user_quota: Number(gift.value), register_enabled: reg.input.checked, v1_enabled: v1On.input.checked,
             });
-            ghSecret.value = "";
-            ghSecret.placeholder = saved.github_client_secret_set ? "已设置，留空不修改" : "";
-            sys.github_oauth = saved.github_oauth_enabled === "true" && Boolean(saved.github_client_id) && saved.github_client_secret_set;
+            sys.system_name = saved.system_name;
+            sys.price_turnstile = Number(saved.price_turnstile);
+            sys.register_enabled = saved.register_enabled === "true";
+            sys.v1_enabled = saved.v1_enabled === "true";
+            setSystemName(saved.system_name);
             toast("已保存");
-          } catch (err) { toast(err.message, true); } finally { saveGithub.disabled = false; }
+          } catch (err) { toast(err.message, true); } finally { save.disabled = false; }
         } },
-        h("div", { class: "field-row" }, "启用", ghOn.el),
-        field("Client ID", ghId),
-        field("Client Secret", ghSecret),
-        h("div", { class: "field" }, "回调地址",
-          h("span", { class: "key-cell" }, h("span", { class: "mono t2" }, callback),
-            h("button", { class: "btn icon", type: "button", title: "复制", onclick: () => copyText(callback) }, icon("copy"))),
-          h("span", { class: "hint" }, "在 GitHub → Settings → Developer settings → OAuth Apps 创建应用，回调地址填上面这个；开放注册时首次 GitHub 登录自动创建账号")),
-        saveGithub)),
-      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "服务器渠道")),
-        h("form", { class: "card-bd form", onsubmit: async (e) => {
-          e.preventDefault();
-          saveCf.disabled = true;
-          try {
-            const saved = await api("PUT", "/api/admin/option", { cf_api_token: cfToken.value });
-            cfToken.value = "";
-            cfToken.placeholder = saved.cf_api_token_set ? "已设置，留空不修改" : "";
-            toast("已保存");
-          } catch (err) { toast(err.message, true); } finally { saveCf.disabled = false; }
-        } },
-        field("Cloudflare API Token", cfToken,
-          "用于给服务器自动创建隧道和域名。在 dash.cloudflare.com → 我的个人资料 → API 令牌 创建，权限：账户 · Cloudflare Tunnel · 编辑;区域 · DNS · 编辑;区域 · 区域 · 读取(区域选 000.moe)"),
-        saveCf)))));
+        field("系统名称", name),
+        field("求解价格", price, "积分 / 次，成功才扣"),
+        h("div", { class: "field-row" }, h("span", {}, "5 秒盾(/v1)", h("div", { class: "hint" }, "关闭后用户令牌不能调用 /v1，现有 API Key 不受影响")), v1On.el),
+        field("5 秒盾价格", priceV1, "积分 / 次，成功才扣"),
+        h("div", { class: "field-row" }, "开放注册", reg.el),
+        field("新用户赠送", gift, "积分"),
+        save)),
+        h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "服务器渠道")),
+          h("form", { class: "card-bd form", onsubmit: async (e) => {
+            e.preventDefault();
+            saveCf.disabled = true;
+            try {
+              const saved = await api("PUT", "/api/admin/option", { cf_api_token: cfToken.value });
+              cfToken.value = "";
+              cfToken.placeholder = saved.cf_api_token_set ? "已设置，留空不修改" : "";
+              toast("已保存");
+            } catch (err) { toast(err.message, true); } finally { saveCf.disabled = false; }
+          } },
+          field("Cloudflare API Token", cfToken,
+            "用于给服务器自动创建隧道和域名。在 dash.cloudflare.com → 我的个人资料 → API 令牌 创建，权限：账户 · Cloudflare Tunnel · 编辑;区域 · DNS · 编辑;区域 · 区域 · 读取(区域选 000.moe)"),
+          saveCf))),
+      h("div", { class: "stack" },
+        oauthCard(o, "github", "在 GitHub → Settings → Developer settings → OAuth Apps 创建应用，回调地址填上面这个；开放注册时首次 GitHub 登录自动创建账号"),
+        oauthCard(o, "linuxdo", "在 connect.linux.do → 应用接入 → 申请接入创建应用，回调地址填上面这个，最低等级在那里设置；开放注册时首次 LINUX DO 登录自动创建账号"))));
   }
 
   // ---------------------------------------------------------------- 启动

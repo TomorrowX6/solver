@@ -107,8 +107,8 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 - 现有的 API Key 照常可用且不计费;用户令牌只能用 `/v1` 的 `request.get` / `request.post`(不能用会话)。
 - 「系统设置」可关闭 5 秒盾(`/v1`):关闭后用户令牌调用 `/v1` 返回 403,使用文档中也不再展示,现有 API Key 不受影响。
 - 充值方式为管理员生成的兑换码;价格、注册开关、新用户赠送在「系统设置」中修改。
-- 支持 GitHub 登录:在「系统设置」填写 GitHub OAuth App 的 Client ID / Secret;开放注册时首次 GitHub 登录自动创建账号,
-  已有账号可在「个人设置」中绑定。
+- 支持 GitHub 与 LINUX DO 登录:在「系统设置」填写对应应用的 Client ID / Secret;开放注册时首次登录自动创建账号,
+  已有账号可在「个人设置」中绑定。只用第三方登录的账号至少保留一种登录方式(设置密码或绑定另一种)才能解绑。
 - worker 的 `GET /admin/stats`(需根密钥)提供渠道页的数据,只保存在进程内,worker 轮换后清零。
 
 ### 自有服务器渠道
