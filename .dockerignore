@@ -1,0 +1,11 @@
+# 服务器镜像只需要 app/、fleet/、run.py
+.git
+.github
+.wrangler
+.ide
+deploy
+testsite
+tests
+examples
+*.md
+**/__pycache__

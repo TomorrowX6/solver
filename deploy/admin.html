@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Turnstile Solver</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --border: rgba(28, 31, 35, .08);
+    --fill: rgba(46, 50, 56, .05); --fill-hover: rgba(46, 50, 56, .09);
+    --text: #1c1f23; --text2: rgba(28, 31, 35, .62); --text3: rgba(28, 31, 35, .35);
+    --primary: #0064fa; --primary-hover: #0062d6; --primary-light: #eaf5ff;
+    --green: #3bb346; --green-light: #ecf7ec; --orange: #fc8800; --orange-light: #fff8ea;
+    --red: #f93920; --red-light: #fef2ed; --cyan: #05a4b6; --cyan-light: #e5f7f8;
+    --violet: #6a3ac7; --violet-light: #f3edf9;
+    --shadow: 0 0 1px rgba(0, 0, 0, .1), 0 2px 8px rgba(0, 0, 0, .04);
+    --mask: rgba(22, 22, 26, .45);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16161a; --card: #232429; --border: rgba(255, 255, 255, .08);
+      --fill: rgba(255, 255, 255, .06); --fill-hover: rgba(255, 255, 255, .1);
+      --text: #f9f9f9; --text2: rgba(249, 249, 249, .6); --text3: rgba(249, 249, 249, .35);
+      --primary: #54a9ff; --primary-hover: #7fc1ff; --primary-light: rgba(84, 169, 255, .16);
+      --green: #5dc264; --green-light: rgba(93, 194, 100, .16); --orange: #ffae43; --orange-light: rgba(255, 174, 67, .16);
+      --red: #fc725a; --red-light: rgba(252, 114, 90, .16); --cyan: #4cc3d0; --cyan-light: rgba(76, 195, 208, .16);
+      --violet: #a481e2; --violet-light: rgba(164, 129, 226, .16);
+      --shadow: none; --mask: rgba(0, 0, 0, .6);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16161a; --card: #232429; --border: rgba(255, 255, 255, .08);
+    --fill: rgba(255, 255, 255, .06); --fill-hover: rgba(255, 255, 255, .1);
+    --text: #f9f9f9; --text2: rgba(249, 249, 249, .6); --text3: rgba(249, 249, 249, .35);
+    --primary: #54a9ff; --primary-hover: #7fc1ff; --primary-light: rgba(84, 169, 255, .16);
+    --green: #5dc264; --green-light: rgba(93, 194, 100, .16); --orange: #ffae43; --orange-light: rgba(255, 174, 67, .16);
+    --red: #fc725a; --red-light: rgba(252, 114, 90, .16); --cyan: #4cc3d0; --cyan-light: rgba(76, 195, 208, .16);
+    --violet: #a481e2; --violet-light: rgba(164, 129, 226, .16);
+    --shadow: none; --mask: rgba(0, 0, 0, .6);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5715 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  h1, h2, h3 { margin: 0; font-weight: 600; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+  .t2 { color: var(--text2); }
+  .t3 { color: var(--text3); }
+  [hidden] { display: none !important; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;
+    height: 32px; padding: 0 12px; border-radius: 6px; border: 0; cursor: pointer;
+    background: var(--fill); color: var(--text); font-weight: 600;
+  }
+  .btn:hover { background: var(--fill-hover); }
+  .btn.primary { background: var(--primary); color: #fff; }
+  .btn.primary:hover { background: var(--primary-hover); }
+  .btn.danger { background: var(--red-light); color: var(--red); }
+  .btn.link { background: transparent; color: var(--primary); padding: 0 6px; height: 26px; }
+  .btn.link:hover { background: var(--primary-light); }
+  .btn.link.danger { color: var(--red); }
+  .btn.link.danger:hover { background: var(--red-light); }
+  .btn.icon { width: 32px; padding: 0; background: transparent; color: var(--text2); }
+  .btn.icon:hover { background: var(--fill); color: var(--text); }
+  .btn.sm { height: 26px; padding: 0 8px; font-size: 12.5px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .input, .select, textarea.input {
+    height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid transparent;
+    background: var(--fill); outline: none; min-width: 0;
+  }
+  textarea.input { height: auto; padding: 8px 12px; resize: vertical; }
+  .input:hover, .select:hover { background: var(--fill-hover); }
+  .input:focus, .select:focus { border-color: var(--primary); background: var(--card); }
+  .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .switch { position: relative; width: 40px; height: 22px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--fill-hover); cursor: pointer; transition: background .2s; }
+  .switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .2s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .switch input:checked + span { background: var(--primary); }
+  .switch input:checked + span::after { transform: translateX(18px); }
+
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px;
+    border-radius: 11px; font-size: 12px; font-weight: 600; white-space: nowrap;
+    background: var(--fill); color: var(--text2);
+  }
+  .tag.green { background: var(--green-light); color: var(--green); }
+  .tag.orange { background: var(--orange-light); color: var(--orange); }
+  .tag.red { background: var(--red-light); color: var(--red); }
+  .tag.blue { background: var(--primary-light); color: var(--primary); }
+  .tag.cyan { background: var(--cyan-light); color: var(--cyan); }
+  .tag.violet { background: var(--violet-light); color: var(--violet); }
+  .tag .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .hdr {
+    position: sticky; top: 0; z-index: 20; height: 56px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 0 16px; background: var(--card); border-bottom: 1px solid var(--border);
+  }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; white-space: nowrap; min-width: 0; }
+  .logo-mark { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--primary); color: #fff; flex: none; }
+  .hdr-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .user-chip { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 4px; height: 32px; border-radius: 16px; background: var(--fill); }
+  .avatar-sm { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--primary); color: #fff; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+
+  /* 控制台外壳固定在窗口内,页面本身不滚动,只有侧栏和内容区各自滚动 */
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  #app .hdr { position: static; flex: none; }
+  .layout { display: flex; flex: 1; min-height: 0; }
+  .side {
+    width: 200px; flex: none; padding: 8px; background: var(--card); border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+  .side-group { font-size: 12px; color: var(--text3); padding: 12px 12px 4px; }
+  .nav { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; margin-bottom: 2px;
+    border-radius: 8px; color: var(--text2); text-decoration: none; font-weight: 600; white-space: nowrap; }
+  .nav:hover { background: var(--fill); color: var(--text); }
+  .nav.active { background: var(--primary-light); color: var(--primary); }
+  .content { flex: 1; min-width: 0; padding: 20px 24px 32px; overflow-y: auto; }
+  .page { display: grid; gap: 16px; max-width: 1400px; }
+  .page-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .page-hd h2 { font-size: 18px; }
+
+  .card { background: var(--card); border-radius: 12px; box-shadow: var(--shadow); border: 1px solid var(--border); min-width: 0; }
+  .card-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 14px 16px 0; }
+  .card-hd h3 { font-size: 14px; }
+  .card-bd { padding: 14px 16px 16px; }
+
+  .groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .group h3 { font-size: 14px; margin-bottom: 12px; }
+  .metric { display: flex; align-items: center; gap: 12px; }
+  .metric + .metric { margin-top: 12px; }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; color: #fff; }
+  .avatar svg.i { width: 18px; height: 18px; }
+  .av-blue { background: var(--primary); } .av-green { background: var(--green); } .av-orange { background: var(--orange); }
+  .av-red { background: var(--red); } .av-cyan { background: var(--cyan); } .av-violet { background: var(--violet); }
+  .metric .label { font-size: 12px; color: var(--text2); }
+  .metric .value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.3; }
+  .dash-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .chart svg { display: block; width: 100%; height: 240px; }
+  .chart .axis { fill: var(--text3); font-size: 11px; }
+  .chart .grid { stroke: var(--border); stroke-width: 1; }
+  .legend { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--text2); }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: 1px; }
+  .seg { display: inline-flex; background: var(--fill); border-radius: 6px; padding: 2px; }
+  .seg button { border: 0; background: transparent; height: 26px; padding: 0 12px; border-radius: 5px; cursor: pointer; color: var(--text2); font-weight: 600; }
+  .seg button.active { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .list { display: grid; gap: 2px; }
+  .list-row { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-radius: 8px; }
+  .list-row:hover { background: var(--fill); }
+  .list-row .grow { flex: 1; min-width: 0; }
+  .list-row .sub { font-size: 12px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slot-badge { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; flex: none; background: var(--fill); font-weight: 700; text-transform: uppercase; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; align-items: center; }
+  .kv dt { color: var(--text2); }
+  .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .toolbar .input { width: 200px; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--border); white-space: nowrap; vertical-align: middle; }
+  th { color: var(--text2); font-weight: 600; font-size: 13px; }
+  tbody tr:hover td { background: var(--fill); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.wrap { white-space: normal; min-width: 180px; max-width: 420px; }
+  .ops { display: flex; gap: 2px; }
+  .empty { text-align: center; color: var(--text3); padding: 40px 16px; }
+  .err-text { color: var(--red); font-size: 12.5px; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  .pager { display: flex; justify-content: flex-end; align-items: center; gap: 4px; padding: 12px 16px; flex-wrap: wrap; }
+  .pager .t2 { margin-right: 8px; font-size: 13px; }
+  .pg { min-width: 28px; height: 28px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text2); cursor: pointer; }
+  .pg:hover { background: var(--fill); }
+  .pg.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+  .pg:disabled { opacity: .4; cursor: default; background: transparent; }
+  .bar { height: 6px; width: 64px; border-radius: 3px; background: var(--fill); overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px; }
+  .bar > span { display: block; height: 100%; background: var(--primary); }
+  .key-cell { display: inline-flex; align-items: center; gap: 4px; }
+
+  .form { display: grid; gap: 14px; }
+  .field { display: grid; gap: 6px; font-weight: 600; font-size: 13px; }
+  .field .input, .field .select { width: 100%; font-weight: 400; }
+  .field-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; font-size: 13px; }
+  .hint { font-weight: 400; font-size: 12px; color: var(--text3); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .token-box { word-break: break-all; background: var(--fill); border-radius: 8px; padding: 12px; max-height: 220px; overflow: auto; }
+  .big-num { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .modal-mask { position: fixed; inset: 0; background: var(--mask); z-index: 50; display: grid; place-items: center; padding: 16px; }
+  .modal { width: 100%; max-width: 460px; max-height: calc(100vh - 32px); overflow: auto; background: var(--card); border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.2); }
+  .modal-hd { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px 0; }
+  .modal-hd h3 { font-size: 16px; }
+  .modal-bd { padding: 16px 20px; }
+  .modal-ft { display: flex; justify-content: flex-end; gap: 8px; padding: 0 20px 18px; }
+  .toasts { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 60; display: grid; gap: 8px; justify-items: center; pointer-events: none; }
+  .toast { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 8px; background: var(--card); box-shadow: 0 4px 16px rgba(0,0,0,.12); border: 1px solid var(--border); font-weight: 600; }
+  .toast .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .toast.err .dot { background: var(--red); }
+
+  .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  .auth { width: 100%; max-width: 400px; padding: 32px 28px; }
+  .auth .logo { justify-content: center; font-size: 20px; margin-bottom: 8px; }
+  .auth .sub-title { text-align: center; color: var(--text2); margin-bottom: 20px; }
+  .auth .input, .auth .btn { height: 40px; width: 100%; }
+  .auth .switch-line { text-align: center; font-size: 13px; color: var(--text2); }
+  .auth .switch-line a { color: var(--primary); cursor: pointer; text-decoration: none; }
+  .auth .divider { display: flex; align-items: center; gap: 10px; color: var(--text3); font-size: 12px; }
+  .auth .divider::before, .auth .divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  a.btn { text-decoration: none; }
+
+  .doc h3 { font-size: 15px; margin-bottom: 10px; }
+  .doc p { margin: 10px 0 8px; color: var(--text2); }
+  .doc .table-wrap { margin: 4px -16px 0; }
+  .doc > .table-wrap:last-child { margin-bottom: -16px; }
+  #pub .doc { scroll-margin-top: 72px; }
+  #app .doc { scroll-margin-top: 16px; }
+  .api-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .code { position: relative; }
+  .code pre {
+    margin: 0; padding: 12px 44px 12px 14px; background: var(--fill); border-radius: 8px; overflow-x: auto;
+    font: 12.5px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .code .copy { position: absolute; top: 6px; right: 6px; }
+  .pub-main { max-width: 980px; margin: 0 auto; padding: 20px 16px 40px; }
+
+  @media (max-width: 1100px) {
+    .groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dash-row, .two { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 720px) {
+    .layout { flex-direction: column; }
+    .side {
+      flex: none; width: auto; padding: 6px 8px;
+      display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border);
+    }
+    .side-group { display: none; }
+    .nav { margin: 0; height: 34px; flex: none; }
+    .content { padding: 16px; }
+    .groups { grid-template-columns: minmax(0, 1fr); }
+    .logo-text, .user-chip .name { display: none; }
+    .toolbar .input { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="auth-wrap" id="auth" hidden>
+  <div class="card auth">
+    <div class="logo"><span class="logo-mark" data-icon="shield"></span><span class="sys-name">Turnstile Solver</span></div>
+    <div class="sub-title" id="auth-title">登录</div>
+    <form class="form" id="auth-form">
+      <input class="input" id="a-user" autocomplete="username" placeholder="用户名" required>
+      <input class="input" id="a-pass" type="password" autocomplete="current-password" placeholder="密码" required>
+      <input class="input" id="a-key" type="password" autocomplete="off" placeholder="现有的 API Key" hidden>
+      <button class="btn primary" type="submit" id="a-submit">登录</button>
+      <div class="divider" id="a-or" hidden>或</div>
+      <a class="btn" id="a-github" href="/api/oauth/github" hidden><span data-icon="github"></span>使用 GitHub 登录</a>
+      <div class="switch-line" id="a-switch"></div>
+      <div class="switch-line"><a href="#docs">使用文档</a></div>
+    </form>
+  </div>
+</div>
+
+<div id="pub" hidden>
+  <header class="hdr">
+    <div class="logo"><span class="logo-mark" data-icon="shield"></span><span class="sys-name">Turnstile Solver</span></div>
+    <a class="btn primary" href="#">登录</a>
+  </header>
+  <main class="pub-main" id="pub-content"></main>
+</div>
+
+<div id="app" hidden>
+  <header class="hdr">
+    <div class="logo"><span class="logo-mark" data-icon="shield"></span><span class="logo-text sys-name">Turnstile Solver</span></div>
+    <div class="hdr-right">
+      <button class="btn icon" id="theme" type="button" title="主题"></button>
+      <div class="user-chip"><span class="avatar-sm" id="me-avatar"></span><span class="name" id="me-name"></span></div>
+      <button class="btn icon" id="logout" type="button" title="退出" data-icon="logout"></button>
+    </div>
+  </header>
+  <div class="layout">
+    <nav class="side" id="side"></nav>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const ROLE = { USER: 1, ADMIN: 10, ROOT: 100 };
+  const ROLE_TAG = { 1: ["普通用户", ""], 10: ["管理员", "orange"], 100: ["超级管理员", "violet"] };
+  const LOG_TYPES = { 1: ["充值", "cyan"], 2: ["消费", "green"], 3: ["管理", "orange"], 4: ["系统", "violet"], 5: ["错误", "red"] };
+  const REDEEM_STATUS = { 1: ["未使用", "green"], 2: ["已禁用", ""], 3: ["已使用", "blue"] };
+  const PAGE_SIZE = 20;
+
+  // ---------------------------------------------------------------- 工具
+  function h(tag, attrs, ...children) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === "class") el.className = v;
+      else if (k === "style") el.style.cssText = v;
+      else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+      else if (k === "value") el.value = v;
+      else if (k === "checked") el.checked = Boolean(v);
+      else el.setAttribute(k, v === true ? "" : v);
+    }
+    for (const c of children.flat()) {
+      if (c == null || c === false) continue;
+      el.append(c instanceof Node ? c : String(c));
+    }
+    return el;
+  }
+  function svg(tag, attrs, ...children) {
+    const el = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+    for (const c of children.flat()) if (c != null) el.append(c instanceof Node ? c : String(c));
+    return el;
+  }
+  // 图标路径均为常量
+  const ICONS = {
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+    grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+    key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    wallet: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
+    play: '<path d="M6 3l14 9-14 9z"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    users: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3"/>',
+    server: '<rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/>',
+    ticket: '<path d="M3 9a3 3 0 0 0 0 6v3a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-3a3 3 0 0 0 0-6V6a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1z"/><path d="M13 5v2M13 17v2M13 11v2"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18M7 6h1v4M16.71 13.88l.7.71-2.82 2.82"/>',
+    trend: '<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>',
+    send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
+    check: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+    x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+    activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+    moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/>',
+    logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+    close: '<path d="M18 6 6 18M6 6l12 12"/>',
+    github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>',
+    book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
+  };
+  function icon(name) {
+    const el = document.createElementNS(SVGNS, "svg");
+    el.setAttribute("viewBox", "0 0 24 24");
+    el.setAttribute("class", "i");
+    el.innerHTML = ICONS[name];
+    return el;
+  }
+  for (const el of document.querySelectorAll("[data-icon]")) el.replaceChildren(icon(el.dataset.icon));
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+  const pad = (n) => String(n).padStart(2, "0");
+  function fmtTime(epoch) {
+    if (!epoch) return "—";
+    const d = new Date(epoch * 1000);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  const clock = (epoch) => { const d = new Date(epoch * 1000); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  function duration(sec) {
+    if (sec == null || !isFinite(sec)) return "—";
+    const s = Math.max(0, Math.round(sec));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${pad(m % 60)}m`;
+  }
+  const num = (n) => Number(n || 0).toLocaleString("zh-CN");
+  const tag = (text, color, title) => h("span", { class: `tag ${color || ""}`, title }, text);
+  const dotTag = (text, color) => h("span", { class: `tag ${color}` }, h("span", { class: "dot" }), text);
+  const statusTag = (s) => (s === 1 ? tag("启用", "green") : tag("禁用", "red"));
+  const maskKey = (k) => (k.length > 12 ? `${k.slice(0, 7)}****${k.slice(-4)}` : k);
+
+  function toast(message, isError) {
+    const el = h("div", { class: `toast${isError ? " err" : ""}` }, h("span", { class: "dot" }), message);
+    $("toasts").append(el);
+    setTimeout(() => el.remove(), 2600);
+  }
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); toast("已复制"); } catch { toast("复制失败", true); }
+  }
+
+  function modal(title, bodyNode, { okText = "确定", onOk, danger = false, footer = true } = {}) {
+    let closeFn;
+    const okBtn = h("button", { class: `btn ${danger ? "danger" : "primary"}`, type: "button" }, okText);
+    const mask = h("div", { class: "modal-mask", onclick: (e) => { if (e.target === mask) closeFn(); } },
+      h("div", { class: "modal", role: "dialog", "aria-label": title },
+        h("div", { class: "modal-hd" }, h("h3", {}, title), h("button", { class: "btn icon", type: "button", onclick: () => closeFn() }, icon("close"))),
+        h("div", { class: "modal-bd" }, bodyNode),
+        footer ? h("div", { class: "modal-ft" }, h("button", { class: "btn", type: "button", onclick: () => closeFn() }, "取消"), okBtn) : null));
+    closeFn = () => mask.remove();
+    okBtn.addEventListener("click", async () => {
+      if (!onOk) return closeFn();
+      okBtn.disabled = true;
+      try { if ((await onOk()) !== false) closeFn(); }
+      catch (err) { toast(err.message, true); }
+      finally { okBtn.disabled = false; }
+    });
+    document.body.append(mask);
+    const first = mask.querySelector("input, select, textarea");
+    if (first) first.focus();
+    return closeFn;
+  }
+  const confirmModal = (title, text, onOk) => modal(title, h("div", { class: "t2" }, text), { okText: "确定", danger: true, onOk });
+
+  function field(label, input, hint) {
+    return h("label", { class: "field" }, label, input, hint ? h("span", { class: "hint" }, hint) : null);
+  }
+  function switchInput(checked) {
+    const input = h("input", { type: "checkbox", checked });
+    return { input, el: h("label", { class: "switch" }, input, h("span")) };
+  }
+
+  // ---------------------------------------------------------------- 接口
+  class Unauthorized extends Error {}
+  async function api(method, path, body) {
+    const resp = await fetch(path, {
+      method,
+      headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    let data = null;
+    try { data = await resp.json(); } catch {}
+    if (resp.status === 401) { if (me || location.hash !== "#docs") showAuth(); throw new Unauthorized("未登录"); }
+    if (!data || !data.success) throw new Error((data && data.message) || `HTTP ${resp.status}`);
+    return data.data;
+  }
+
+  // ---------------------------------------------------------------- 主题
+  function applyTheme() {
+    const t = store.get("ts-theme");
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    else document.documentElement.removeAttribute("data-theme");
+    const dark = t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    $("theme").replaceChildren(icon(dark ? "sun" : "moon"));
+  }
+  $("theme").addEventListener("click", () => {
+    const cur = document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    store.set("ts-theme", cur === "dark" ? "light" : "dark");
+    applyTheme();
+  });
+
+  // ---------------------------------------------------------------- 登录 / 注册 / 初始化
+  let sys = null;
+  let me = null;
+  let authMode = "login";
+
+  function setSystemName(name) {
+    for (const el of document.querySelectorAll(".sys-name")) el.textContent = name;
+    document.title = name;
+  }
+
+  function renderAuth() {
+    const setup = sys && sys.setup_required;
+    const mode = setup ? "setup" : authMode;
+    $("auth-title").textContent = { setup: "初始化管理员", login: "登录", register: "注册" }[mode];
+    $("a-key").hidden = mode !== "setup";
+    $("a-key").required = mode === "setup";
+    $("a-pass").autocomplete = mode === "login" ? "current-password" : "new-password";
+    $("a-submit").textContent = { setup: "初始化", login: "登录", register: "注册" }[mode];
+    const github = mode !== "setup" && sys && sys.github_oauth;
+    $("a-github").hidden = !github;
+    $("a-or").hidden = !github;
+    const sw = $("a-switch");
+    sw.replaceChildren();
+    if (mode === "login" && sys && sys.register_enabled) sw.append("没有账号?", h("a", { onclick: () => { authMode = "register"; renderAuth(); } }, "注册"));
+    if (mode === "register") sw.append("已有账号?", h("a", { onclick: () => { authMode = "login"; renderAuth(); } }, "登录"));
+  }
+  function showAuth() {
+    me = null;
+    $("app").hidden = true;
+    $("pub").hidden = true;
+    $("auth").hidden = false;
+    renderAuth();
+  }
+  // 未登录时也能看使用文档
+  function showPublicDocs() {
+    $("app").hidden = true;
+    $("auth").hidden = true;
+    $("pub").hidden = false;
+    const root = h("section", { class: "page" });
+    $("pub-content").replaceChildren(root);
+    pageDocs(root);
+  }
+  $("auth-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const mode = sys && sys.setup_required ? "setup" : authMode;
+    const payload = { username: $("a-user").value.trim(), password: $("a-pass").value };
+    const path = { setup: "/api/setup", login: "/api/user/login", register: "/api/user/register" }[mode];
+    if (mode === "setup") payload.solver_key = $("a-key").value.trim();
+    $("a-submit").disabled = true;
+    try {
+      me = await api("POST", path, payload);
+      $("a-pass").value = "";
+      $("a-key").value = "";
+      if (sys) sys.setup_required = false;
+      enterApp();
+    } catch (err) {
+      if (!(err instanceof Unauthorized)) toast(err.message, true);
+    } finally {
+      $("a-submit").disabled = false;
+    }
+  });
+  $("logout").addEventListener("click", async () => {
+    try { await api("POST", "/api/user/logout"); } catch {}
+    showAuth();
+  });
+
+  // ---------------------------------------------------------------- 导航
+  const PAGES = [
+    { id: "dashboard", group: "控制台", name: "数据看板", icon: "grid", render: pageDashboard },
+    { id: "token", group: "控制台", name: "令牌", icon: "key", render: pageTokens },
+    { id: "log", group: "控制台", name: "使用日志", icon: "list", render: pageLogs },
+    { id: "wallet", group: "控制台", name: "钱包", icon: "wallet", render: pageWallet },
+    { id: "playground", group: "控制台", name: "操练场", icon: "play", render: pagePlayground },
+    { id: "docs", group: "控制台", name: "使用文档", icon: "book", render: pageDocs },
+    { id: "personal", group: "个人", name: "个人设置", icon: "user", render: pagePersonal },
+    { id: "channel", group: "管理员", name: "渠道", icon: "server", render: pageChannel, admin: true },
+    { id: "user", group: "管理员", name: "用户管理", icon: "users", render: pageUsers, admin: true },
+    { id: "redemption", group: "管理员", name: "兑换码", icon: "ticket", render: pageRedemptions, admin: true },
+    { id: "setting", group: "管理员", name: "系统设置", icon: "settings", render: pageSettings, admin: true },
+  ];
+  const isAdmin = () => me && me.role >= ROLE.ADMIN;
+  const visiblePages = () => PAGES.filter((p) => !p.admin || isAdmin());
+  function currentPage() {
+    const id = location.hash.slice(1);
+    return visiblePages().find((p) => p.id === id) || visiblePages()[0];
+  }
+  let pageTimer = null;
+  function route() {
+    if (!me) return;
+    clearInterval(pageTimer);
+    pageTimer = null;
+    const page = currentPage();
+    const side = $("side");
+    side.replaceChildren();
+    let group = "";
+    for (const p of visiblePages()) {
+      if (p.group !== group) { group = p.group; side.append(h("div", { class: "side-group" }, group)); }
+      side.append(h("a", { class: `nav${p.id === page.id ? " active" : ""}`, href: `#${p.id}` }, icon(p.icon), p.name));
+    }
+    const root = h("section", { class: "page" });
+    $("content").replaceChildren(root);
+    $("content").scrollTop = 0;
+    page.render(root).catch((err) => { if (!(err instanceof Unauthorized)) toast(err.message, true); });
+  }
+  window.addEventListener("hashchange", () => {
+    if (me) route();
+    else if (location.hash === "#docs" && !(sys && sys.setup_required)) showPublicDocs();
+    else showAuth();
+  });
+  function every(seconds, fn) {
+    pageTimer = setInterval(() => { if (!document.hidden) fn().catch(() => {}); }, seconds * 1000);
+  }
+
+  function enterApp() {
+    $("auth").hidden = true;
+    $("pub").hidden = true;
+    $("app").hidden = false;
+    $("me-name").textContent = me.username;
+    $("me-avatar").textContent = me.username.slice(0, 1);
+    route();
+  }
+
+  // ---------------------------------------------------------------- 通用组件
+  function pageHeader(title, ...right) {
+    return h("div", { class: "page-hd" }, h("h2", {}, title), h("div", { class: "toolbar" }, ...right));
+  }
+  function table(columns, rows, emptyText = "暂无数据") {
+    return h("div", { class: "table-wrap" }, h("table", {},
+      h("thead", {}, h("tr", {}, columns.map((c) => h("th", { class: c.num ? "num" : null }, c.title)))),
+      h("tbody", {}, rows.length
+        ? rows.map((r) => h("tr", {}, columns.map((c) => h("td", { class: c.num ? "num" : c.wrap ? "wrap" : null }, c.render(r)))))
+        : h("tr", {}, h("td", { colspan: columns.length, class: "empty" }, emptyText)))));
+  }
+  function pager(total, p, size, onChange) {
+    const pages = Math.max(1, Math.ceil(total / size));
+    const btn = (label, page, opts = {}) => h("button", {
+      class: `pg${opts.active ? " active" : ""}`, type: "button", disabled: opts.disabled, onclick: () => onChange(page),
+    }, label);
+    const items = [h("span", { class: "t2" }, `共 ${total} 条`), btn("‹", p - 1, { disabled: p <= 1 })];
+    for (let i = 1; i <= pages; i++) {
+      if (i === 1 || i === pages || Math.abs(i - p) <= 1) items.push(btn(i, i, { active: i === p }));
+      else if (Math.abs(i - p) === 2) items.push(h("span", { class: "t2" }, "…"));
+    }
+    items.push(btn("›", p + 1, { disabled: p >= pages }));
+    return h("div", { class: "pager" }, items);
+  }
+  /** 列表页:loader(p) 返回 {items,total,p,size};columns 渲染行 */
+  function listView(card, loader, columns) {
+    let p = 1;
+    const reload = async (page = p) => {
+      p = page;
+      const data = await loader(p);
+      card.replaceChildren(table(columns, data.items), pager(data.total, data.p, data.size, (n) => reload(n).catch((e) => toast(e.message, true))));
+    };
+    return reload;
+  }
+  function metric(av, ic, label, value) {
+    return h("div", { class: "metric" },
+      h("div", { class: `avatar av-${av}` }, icon(ic)),
+      h("div", {}, h("div", { class: "label" }, label), h("div", { class: "value" }, value)));
+  }
+  const group = (title, ...metrics) => h("div", { class: "card card-bd group" }, h("h3", {}, title), ...metrics);
+
+  function barChart(buckets, { label, okColor = "var(--primary)", height = 240 }) {
+    const W = 760, Hh = height, top = 12, bottom = 24, left = 34, right = 6;
+    const peak = Math.max(1, ...buckets.map((b) => b.ok + b.fail));
+    const max = peak <= 4 ? 4 : Math.ceil(peak / 4) * 4;
+    const plotH = Hh - top - bottom;
+    const slotW = (W - left - right) / buckets.length;
+    const barW = Math.max(2, slotW * 0.6);
+    const y = (v) => top + plotH - (v / max) * plotH;
+    const root = svg("svg", { viewBox: `0 0 ${W} ${Hh}`, role: "img", "aria-label": "趋势" });
+    for (let k = 0; k <= 4; k++) {
+      const v = (max / 4) * k;
+      root.append(svg("line", { class: "grid", x1: left, x2: W - right, y1: y(v), y2: y(v) }));
+      root.append(svg("text", { class: "axis", x: left - 6, y: y(v) + 4, "text-anchor": "end" }, v));
+    }
+    const step = Math.max(1, Math.round(buckets.length / 6));
+    buckets.forEach((b, i) => {
+      const x = left + i * slotW + (slotW - barW) / 2;
+      const g = svg("g", {});
+      g.append(svg("title", {}, `${label(b)}  成功 ${b.ok} 失败 ${b.fail}`));
+      g.append(svg("rect", { x: left + i * slotW, y: top, width: slotW, height: plotH, fill: "transparent" }));
+      if (b.ok) g.append(svg("rect", { x, y: y(b.ok), width: barW, height: y(0) - y(b.ok), rx: 2, fill: okColor }));
+      if (b.fail) g.append(svg("rect", { x, y: y(b.ok + b.fail), width: barW, height: y(b.ok) - y(b.ok + b.fail), rx: 2, fill: "var(--red)" }));
+      root.append(g);
+      if (i % step === 0 || i === buckets.length - 1) root.append(svg("text", { class: "axis", x: x + barW / 2, y: Hh - 6, "text-anchor": "middle" }, label(b)));
+    });
+    return root;
+  }
+
+  // ---------------------------------------------------------------- 数据看板
+  let dashScope = "self";
+  async function pageDashboard(root) {
+    const seg = isAdmin() ? h("div", { class: "seg" },
+      ["self", "all"].map((s) => h("button", { type: "button", class: dashScope === s ? "active" : null, onclick: () => { dashScope = s; route(); } }, s === "self" ? "个人" : "全部"))) : null;
+    const groups = h("div", { class: "groups" });
+    const chart = h("div", { class: "card-bd chart" });
+    const sideCard = h("div", { class: "card-bd list" });
+    root.append(pageHeader("数据看板", seg), groups,
+      h("div", { class: "dash-row" },
+        h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "24 小时"),
+          h("div", { class: "legend" }, h("span", {}, h("i", { style: "background:var(--primary)" }), "成功"), h("span", {}, h("i", { style: "background:var(--red)" }), "失败"))), chart),
+        h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, isAdmin() ? "渠道状态" : "接口信息")), sideCard)));
+
+    const load = async () => {
+      const d = await api("GET", `/api/dashboard?scope=${dashScope}`);
+      const total = d.day.count + d.day.failed;
+      const rate = total ? (d.day.count / total) * 100 : null;
+      groups.replaceChildren(
+        group("账户数据",
+          metric("blue", "wallet", d.scope === "all" ? "总余额" : "当前余额", num(d.quota)),
+          metric("violet", "coins", "历史消耗", num(d.used_quota))),
+        group("使用统计",
+          metric("green", "send", "请求次数", num(d.request_count)),
+          metric("cyan", "activity", "24 小时", num(d.day.count))),
+        group("资源消耗",
+          metric("orange", "coins", "24 小时消耗", num(d.day.quota)),
+          d.scope === "all" ? metric("blue", "users", "用户数", num(d.users)) : metric("red", "x", "24 小时失败", num(d.day.failed))),
+        group("性能指标",
+          metric("green", "check", "成功率", rate == null ? "—" : `${rate.toFixed(rate === 100 ? 0 : 1)}%`),
+          metric("orange", "clock", "平均耗时", d.day.elapsed == null ? "—" : `${Number(d.day.elapsed).toFixed(1)}s`)));
+      const byHour = new Map(d.hourly.map(([hh, ok, fail]) => [hh, { ok, fail }]));
+      const end = Math.floor(Date.now() / 3600000) * 3600;
+      const buckets = [];
+      for (let i = 23; i >= 0; i--) {
+        const hh = end - i * 3600;
+        const b = byHour.get(hh) || { ok: 0, fail: 0 };
+        buckets.push({ t: hh, ok: b.ok, fail: b.fail });
+      }
+      chart.replaceChildren(barChart(buckets, { label: (b) => clock(b.t) }));
+    };
+    const loadSide = async () => {
+      if (!isAdmin()) {
+        sideCard.replaceChildren(h("dl", { class: "kv" },
+          h("dt", {}, "地址"), h("dd", { class: "mono" }, location.origin),
+          h("dt", {}, "创建任务"), h("dd", { class: "mono" }, "POST /createTask"),
+          h("dt", {}, "获取结果"), h("dd", { class: "mono" }, "POST /getTaskResult"),
+          h("dt", {}, "价格"), h("dd", {}, `${sys.price_turnstile} 积分 / 次(成功才扣)`),
+          h("dt", {}, "文档"), h("dd", {}, h("a", { href: "#docs", style: "color:var(--primary)" }, "使用文档"))));
+        return;
+      }
+      const f = await api("GET", "/api/admin/fleet");
+      sideCard.replaceChildren(...Object.entries(f.slots).map(([slot, s]) => {
+        const st = workerState(s);
+        const hl = s && s.health;
+        return h("div", { class: "list-row" },
+          h("div", { class: "slot-badge" }, slot),
+          h("div", { class: "grow" }, h("div", {}, hl ? `${hl.active} / ${hl.capacity} 并发` : "—"),
+            h("div", { class: "sub mono" }, hl && hl.worker ? hl.worker.split("/")[0] : (s && s.error) || "—")),
+          s && !s.error ? latencyTag(s.latency) : null,
+          dotTag(st.text, st.color));
+      }));
+    };
+    await Promise.all([load(), loadSide()]);
+    every(30, () => Promise.all([load(), loadSide()]));
+  }
+
+  // ---------------------------------------------------------------- 令牌
+  function tokenModal(token, onSaved) {
+    const name = h("input", { class: "input", value: token ? token.name : "", maxlength: 30 });
+    const never = switchInput(!token || token.expired_at === -1);
+    const expire = h("input", { class: "input", type: "datetime-local" });
+    if (token && token.expired_at > 0) {
+      const d = new Date(token.expired_at * 1000);
+      expire.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    const unlimited = switchInput(!token || token.unlimited_quota === 1);
+    const quota = h("input", { class: "input", type: "number", min: 0, step: 1, value: token ? token.remain_quota : 0 });
+    const sync = () => { expire.disabled = never.input.checked; quota.disabled = unlimited.input.checked; };
+    never.input.addEventListener("change", sync);
+    unlimited.input.addEventListener("change", sync);
+    sync();
+    modal(token ? "编辑令牌" : "添加令牌", h("div", { class: "form" },
+      field("名称", name),
+      h("div", { class: "field-row" }, "永不过期", never.el), expire,
+      h("div", { class: "field-row" }, "无限额度", unlimited.el), quota,
+      h("span", { class: "hint" }, "令牌额度只限制该令牌，扣费始终来自账户余额")), {
+      onOk: async () => {
+        const body = {
+          name: name.value.trim(),
+          expired_at: never.input.checked ? -1 : Math.floor(new Date(expire.value).getTime() / 1000) || 0,
+          unlimited_quota: unlimited.input.checked,
+          remain_quota: Number(quota.value) || 0,
+        };
+        const saved = await api(token ? "PUT" : "POST", token ? `/api/token/${token.id}` : "/api/token", body);
+        toast(token ? "已保存" : "已创建");
+        if (!token) copyText(saved.key);
+        await onSaved();
+      },
+    });
+  }
+  async function pageTokens(root) {
+    const keyword = h("input", { class: "input", placeholder: "搜索名称" });
+    const card = h("div", { class: "card" });
+    let reload;
+    root.append(pageHeader("令牌", keyword, h("button", { class: "btn primary", type: "button", onclick: () => tokenModal(null, () => reload(1)) }, icon("plus"), "添加令牌")), card);
+    reload = listView(card, (p) => api("GET", `/api/token?p=${p}&size=${PAGE_SIZE}&keyword=${encodeURIComponent(keyword.value.trim())}`), [
+      { title: "名称", render: (t) => t.name },
+      { title: "状态", render: (t) => (t.status === 1 && t.expired_at !== -1 && t.expired_at < Date.now() / 1000 ? tag("已过期", "orange") : statusTag(t.status)) },
+      { title: "密钥", render: (t) => h("span", { class: "key-cell" }, h("span", { class: "mono" }, maskKey(t.key)), h("button", { class: "btn icon", type: "button", title: "复制", onclick: () => copyText(t.key) }, icon("copy"))) },
+      { title: "已用", num: true, render: (t) => num(t.used_quota) },
+      { title: "剩余额度", render: (t) => (t.unlimited_quota ? tag("无限", "blue") : num(t.remain_quota)) },
+      { title: "创建时间", render: (t) => fmtTime(t.created_at) },
+      { title: "过期时间", render: (t) => (t.expired_at === -1 ? "永不过期" : fmtTime(t.expired_at)) },
+      { title: "操作", render: (t) => h("div", { class: "ops" },
+        h("button", { class: "btn link", type: "button", onclick: () => tokenModal(t, () => reload()) }, "编辑"),
+        h("button", { class: "btn link", type: "button", onclick: async () => { try { await api("PUT", `/api/token/${t.id}`, { status: t.status === 1 ? 2 : 1 }); await reload(); } catch (e) { toast(e.message, true); } } }, t.status === 1 ? "禁用" : "启用"),
+        h("button", { class: "btn link danger", type: "button", onclick: () => confirmModal("删除令牌", `删除「${t.name}」?使用该令牌的请求将立即失败。`, async () => { await api("DELETE", `/api/token/${t.id}`); toast("已删除"); await reload(); }) }, "删除")) },
+    ]);
+    keyword.addEventListener("input", () => reload(1).catch((e) => toast(e.message, true)));
+    await reload(1);
+  }
+
+  // ---------------------------------------------------------------- 使用日志
+  async function pageLogs(root) {
+    const type = h("select", { class: "select" }, h("option", { value: "" }, "全部类型"),
+      Object.entries(LOG_TYPES).map(([v, [n]]) => h("option", { value: v }, n)));
+    const tokenName = h("input", { class: "input", placeholder: "令牌名称" });
+    const all = switchInput(false);
+    const username = h("input", { class: "input", placeholder: "用户名" });
+    const card = h("div", { class: "card" });
+    const adminTools = isAdmin() ? [h("label", { class: "field-row", style: "gap:8px" }, all.el, "全部用户"), username] : [];
+    root.append(pageHeader("使用日志", type, tokenName, ...adminTools,
+      h("button", { class: "btn primary", type: "button", onclick: () => reload(1).catch((e) => toast(e.message, true)) }, "查询")), card);
+    const columns = () => [
+      { title: "时间", render: (l) => h("span", { class: "mono" }, fmtTime(l.created_at)) },
+      ...(isAdmin() && all.input.checked ? [{ title: "用户", render: (l) => l.username }] : []),
+      { title: "令牌", render: (l) => l.token_name || "—" },
+      { title: "类型", render: (l) => { const [n, c] = LOG_TYPES[l.type] || ["未知", ""]; return tag(n, c); } },
+      { title: "站点", render: (l) => l.host || "—" },
+      { title: "耗时", render: (l) => (l.elapsed == null ? "—" : tag(`${Number(l.elapsed).toFixed(1)}s`, l.elapsed < 25 ? "green" : l.elapsed < 45 ? "orange" : "red")) },
+      { title: "积分", num: true, render: (l) => {
+        if (!l.quota) return "—";
+        const sign = l.type === 2 ? -1 : 1;
+        const v = sign * l.quota;
+        return h("span", { class: v > 0 ? "pos" : "neg" }, `${v > 0 ? "+" : ""}${num(v)}`);
+      } },
+      { title: "详情", wrap: true, render: (l) => h("span", { class: l.type === 5 ? "err-text" : "t2" }, l.content) },
+    ];
+    let p = 1;
+    const reload = async (page = p) => {
+      p = page;
+      const q = new URLSearchParams({ p, size: PAGE_SIZE, type: type.value, token_name: tokenName.value.trim() });
+      if (isAdmin() && all.input.checked) { q.set("scope", "all"); if (username.value.trim()) q.set("username", username.value.trim()); }
+      const data = await api("GET", `/api/log?${q}`);
+      card.replaceChildren(table(columns(), data.items), pager(data.total, data.p, data.size, (n) => reload(n).catch((e) => toast(e.message, true))));
+    };
+    type.addEventListener("change", () => reload(1).catch((e) => toast(e.message, true)));
+    all.input.addEventListener("change", () => reload(1).catch((e) => toast(e.message, true)));
+    await reload(1);
+  }
+
+  // ---------------------------------------------------------------- 钱包
+  async function pageWallet(root) {
+    const balance = h("div", { class: "big-num" }, "—");
+    const used = h("span");
+    const count = h("span");
+    const code = h("input", { class: "input", placeholder: "兑换码", autocomplete: "off" });
+    const redeem = h("button", { class: "btn primary", type: "submit" }, "兑换");
+    const load = async () => {
+      me = await api("GET", "/api/user/self");
+      balance.textContent = num(me.quota);
+      used.textContent = num(me.used_quota);
+      count.textContent = num(me.request_count);
+    };
+    root.append(pageHeader("钱包"), h("div", { class: "two" },
+      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "当前余额")),
+        h("div", { class: "card-bd" }, balance, h("div", { class: "t2", style: "margin-top:8px" }, "历史消耗 ", used, " · 请求 ", count),
+          h("div", { class: "t3", style: "margin-top:4px" }, `求解 ${sys.price_turnstile} 积分 / 次，失败不扣`))),
+      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "兑换码充值")),
+        h("form", { class: "card-bd form", onsubmit: async (e) => {
+          e.preventDefault();
+          redeem.disabled = true;
+          try {
+            const r = await api("POST", "/api/user/topup", { key: code.value.trim() });
+            code.value = "";
+            toast(`已充值 ${num(r.quota)} 积分`);
+            await load();
+          } catch (err) { toast(err.message, true); } finally { redeem.disabled = false; }
+        } }, code, redeem))));
+    await load();
+  }
+
+  // ---------------------------------------------------------------- 操练场
+  async function pagePlayground(root) {
+    const tokens = (await api("GET", "/api/token?p=1&size=100")).items.filter((t) => t.status === 1);
+    const tokenSel = h("select", { class: "select" }, tokens.map((t) => h("option", { value: t.key }, t.name)));
+    const url = h("input", { class: "input", type: "url", required: true });
+    const key = h("input", { class: "input mono", required: true });
+    const action = h("input", { class: "input", maxlength: 32 });
+    const submit = h("button", { class: "btn primary", type: "submit" }, "求解");
+    const status = h("span");
+    const out = h("div", { class: "card-bd form" }, h("div", { class: "empty", style: "padding:24px 0" }, "—"));
+    const setStatus = (text, color) => status.replaceChildren(tag(text, color));
+    const form = h("form", { class: "card-bd form" },
+      tokens.length ? field("令牌", tokenSel) : h("div", { class: "err-text" }, "请先在「令牌」页创建令牌"),
+      field("websiteURL", url), field("websiteKey", key), field("action", action), submit);
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      if (!tokens.length) return;
+      submit.disabled = true;
+      out.replaceChildren();
+      const started = Date.now();
+      const post = async (path, body) => (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+      try {
+        const task = { type: "TurnstileTaskProxyless", websiteURL: url.value.trim(), websiteKey: key.value.trim() };
+        if (action.value.trim()) task.metadata = { action: action.value.trim() };
+        const created = await post("/createTask", { clientKey: tokenSel.value, task });
+        if (created.errorId) { setStatus("失败", "red"); out.append(h("div", { class: "err-text" }, `${created.errorCode} ${created.errorDescription || ""}`)); return; }
+        out.append(h("div", { class: "mono t2" }, `taskId ${created.taskId}`));
+        setStatus("识别中", "blue");
+        while (Date.now() - started < 150000) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const res = await post("/getTaskResult", { clientKey: tokenSel.value, taskId: created.taskId });
+          const secs = ((Date.now() - started) / 1000).toFixed(1);
+          if (res.errorId) { setStatus(`${secs}s`, "red"); out.append(h("div", { class: "err-text" }, `${res.errorCode} ${res.errorDescription || ""}`)); return; }
+          if (res.status === "ready") {
+            setStatus(`${secs}s`, "green");
+            const token = (res.solution && res.solution.token) || "";
+            out.append(h("div", { class: "token-box mono" }, token), h("div", {}, h("button", { class: "btn", type: "button", onclick: () => copyText(token) }, icon("copy"), "复制")));
+            return;
+          }
+          setStatus(`识别中 ${secs}s`, "blue");
+        }
+        setStatus("超时", "red");
+      } catch (err) {
+        setStatus("失败", "red");
+        out.append(h("div", { class: "err-text" }, err.message));
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    root.append(pageHeader("操练场"), h("div", { class: "two" },
+      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "任务"), tag("TurnstileTaskProxyless", "blue")), form),
+      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "结果"), status), out)));
+  }
+
+  // ---------------------------------------------------------------- 使用文档
+  async function pageDocs(root) {
+    // 每次打开都重新读取功能开关和价格,避免在其他标签页修改设置后仍显示旧内容
+    try { sys = { ...(sys || {}), ...(await api("GET", "/api/status")) }; } catch {}
+    const origin = location.origin;
+    const price = sys ? sys.price_turnstile : 1;
+    const priceV1 = sys ? sys.price_v1 : 1;
+    const v1 = !sys || sys.v1_enabled !== false;
+    const KEY = "sk-你的令牌";
+    const json = (v) => JSON.stringify(v, null, 2);
+    const mono = (t) => h("span", { class: "mono" }, t);
+    const code = (text) => h("div", { class: "code" }, h("pre", {}, h("code", {}, text)),
+      h("button", { class: "btn icon copy", type: "button", title: "复制", onclick: () => copyText(text) }, icon("copy")));
+    const endpoint = (method, path) => h("div", { class: "api-line" }, tag(method, method === "GET" ? "blue" : "green"), mono(origin + path));
+    const para = (text) => h("p", {}, text);
+    const simpleTable = (head, rows) => table(head.map((title, i) => ({ title, wrap: i === head.length - 1, render: (r) => r[i] })), rows);
+    const sections = [];
+    const section = (id, title, ...children) => {
+      const el = h("div", { class: "card card-bd doc", "data-doc": id }, h("h3", {}, title), ...children);
+      sections.push([id, title, el]);
+      return el;
+    };
+    const tabs = (examples) => {
+      let current = Object.keys(examples)[0];
+      const box = h("div");
+      const bar = h("div", { class: "seg", style: "margin-bottom:10px" });
+      const show = () => {
+        bar.replaceChildren(...Object.keys(examples).map((name) =>
+          h("button", { type: "button", class: name === current ? "active" : null, onclick: () => { current = name; show(); } }, name)));
+        box.replaceChildren(code(examples[current]));
+      };
+      show();
+      return h("div", {}, bar, box);
+    };
+
+    const turnstileExamples = {
+      Python: `import time
+import requests
+
+API = "${origin}"
+KEY = "${KEY}"
+
+
+def solve(website_url, website_key, action=None):
+    task = {"type": "TurnstileTaskProxyless", "websiteURL": website_url, "websiteKey": website_key}
+    if action:
+        task["metadata"] = {"action": action}
+    created = requests.post(f"{API}/createTask", json={"clientKey": KEY, "task": task}, timeout=30).json()
+    if created["errorId"]:
+        raise RuntimeError(f'{created["errorCode"]}: {created["errorDescription"]}')
+    for _ in range(40):
+        time.sleep(3)
+        result = requests.post(f"{API}/getTaskResult", json={"clientKey": KEY, "taskId": created["taskId"]}, timeout=30).json()
+        if result["errorId"]:
+            raise RuntimeError(f'{result["errorCode"]}: {result["errorDescription"]}')
+        if result["status"] == "ready":
+            return result["solution"]["token"]
+    raise TimeoutError("等待结果超时")
+
+
+print(solve("https://example.com/login", "0x4AAAAAAA..."))`,
+      curl: `# 1. 创建任务
+curl -s ${origin}/createTask -H "Content-Type: application/json" \\
+  -d '{"clientKey":"${KEY}","task":{"type":"TurnstileTaskProxyless","websiteURL":"https://example.com/login","websiteKey":"0x4AAAAAAA..."}}'
+
+# 2. 每 3 秒查询一次，直到 status 为 ready
+curl -s ${origin}/getTaskResult -H "Content-Type: application/json" \\
+  -d '{"clientKey":"${KEY}","taskId":"上一步返回的 taskId"}'`,
+      "Node.js": `const API = "${origin}";
+const KEY = "${KEY}";
+
+const post = (path, body) =>
+  fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+
+async function solve(websiteURL, websiteKey, action) {
+  const task = { type: "TurnstileTaskProxyless", websiteURL, websiteKey };
+  if (action) task.metadata = { action };
+  const created = await post("/createTask", { clientKey: KEY, task });
+  if (created.errorId) throw new Error(\`\${created.errorCode}: \${created.errorDescription}\`);
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const result = await post("/getTaskResult", { clientKey: KEY, taskId: created.taskId });
+    if (result.errorId) throw new Error(\`\${result.errorCode}: \${result.errorDescription}\`);
+    if (result.status === "ready") return result.solution.token;
+  }
+  throw new Error("等待结果超时");
+}
+
+solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
+      "同步 /solve": `curl -s ${origin}/solve -H "X-API-Key: ${KEY}" -H "Content-Type: application/json" \\
+  -d '{"url": "https://example.com/login", "sitekey": "0x4AAAAAAA...", "timeout": 60}'
+# {"token": "…", "elapsed": 18.2, "attempts": 1, "user_agent": "…"}`,
+    };
+
+    const challengeExample = `import requests
+
+API = "${origin}"
+KEY = "${KEY}"
+# 可选：让求解经你的代理出口，之后用同一代理复用 cookie
+PROXY_HOST, PROXY_USER, PROXY_PASS = "http://host:port", "user", "pass"
+
+r = requests.post(f"{API}/v1", headers={"X-API-Key": KEY}, json={
+    "cmd": "request.get",
+    "url": "https://目标站点/",
+    "maxTimeout": 60000,
+    "proxy": {"url": PROXY_HOST, "username": PROXY_USER, "password": PROXY_PASS},
+}, timeout=90).json()
+if r["status"] != "ok":
+    raise RuntimeError(r["message"])
+
+solution = r["solution"]
+html = solution["response"]  # 通过验证后的页面
+cookies = {c["name"]: c["value"] for c in solution["cookies"]}  # 含 cf_clearance
+ua = solution["userAgent"]
+
+# 复用 cf_clearance：必须同一出口 IP 和同一 User-Agent
+proxy = PROXY_HOST.replace("://", f"://{PROXY_USER}:{PROXY_PASS}@")
+page = requests.get("https://目标站点/other", cookies=cookies, headers={"User-Agent": ua},
+                    proxies={"http": proxy, "https": proxy}, timeout=30)`;
+
+    const toc = h("div", { class: "card card-bd" });
+
+    root.append(...[
+      pageHeader("使用文档"),
+      toc,
+      section("access", "接入",
+        h("dl", { class: "kv" },
+          h("dt", {}, "地址"), h("dd", {}, mono(origin)),
+          h("dt", {}, "令牌"), h("dd", {}, "在「令牌」页创建，形如 sk-…"),
+          h("dt", {}, "鉴权"), h("dd", {}, `任务接口在请求体里传 clientKey；${v1 ? "/solve、/v1" : "/solve"} 用请求头 X-API-Key(或 Authorization: Bearer)`)),
+        para("计费"),
+        simpleTable(["接口", "价格", "说明"], [
+          ["Turnstile(createTask、/solve)", `${price} 积分 / 次`, "求解成功才扣；失败、超时或 10 分钟未取结果自动退还"],
+          v1 ? ["5 秒盾(/v1)", `${priceV1} 积分 / 次`, "成功才扣，失败退还"] : null,
+          ["getBalance、getTaskResult", "免费", "—"],
+        ].filter(Boolean)),
+        para("所有接口均为 POST + JSON。繁忙时返回 ERROR_NO_SLOT_AVAILABLE(任务接口)或 HTTP 429，稍后重试即可；负载高时会自动扩容。")),
+
+      section("create", "Turnstile：创建任务",
+        endpoint("POST", "/createTask"),
+        code(json({ clientKey: KEY, task: { type: "TurnstileTaskProxyless", websiteURL: "https://example.com/login", websiteKey: "0x4AAAAAAA...", metadata: { action: "login" } } })),
+        para("响应"),
+        code(json({ errorId: 0, errorCode: "", errorDescription: "", taskId: "1817ce94-3f2a-4b1c-9d0e-5a6b7c8d9e0f" })),
+        para("task 字段"),
+        simpleTable(["字段", "必填", "说明"], [
+          [mono("type"), "是", "TurnstileTaskProxyless：不使用代理；TurnstileTask：经你的代理求解(需带 proxy)"],
+          [mono("websiteURL"), "是", "组件所在页面的网址，域名需与 sitekey 绑定的域名一致"],
+          [mono("websiteKey"), "是", "组件的 sitekey(页面中 data-sitekey 的值)"],
+          [mono("metadata.action"), "否", "组件的 action(data-action)，站点设置了就必须一致"],
+          [mono("metadata.cdata"), "否", "组件的 cData(data-cdata)，站点设置了就必须一致"],
+          [mono("proxy"), "TurnstileTask 必填", "见下表"],
+        ]),
+        para("代理格式(任选其一)"),
+        simpleTable(["写法", "示例"], [
+          ["URL", mono('"proxy": "http://user:pass@host:port"')],
+          ["SOCKS5", mono('"proxy": "socks5://host:port"')],
+          ["CapSolver 格式", mono('"proxy": "http:host:port:user:pass"')],
+          ["分字段", mono('"proxyType": "http", "proxyAddress": "host", "proxyPort": 8080, "proxyLogin": "user", "proxyPassword": "pass"')],
+        ])),
+
+      section("result", "Turnstile：获取结果",
+        endpoint("POST", "/getTaskResult"),
+        code(json({ clientKey: KEY, taskId: "1817ce94-3f2a-4b1c-9d0e-5a6b7c8d9e0f" })),
+        para("每 3 秒查询一次，通常 15–30 秒完成。结果在服务端保留 5 分钟。"),
+        simpleTable(["状态", "响应"], [
+          ["识别中", mono('{"errorId": 0, "status": "processing"}')],
+          ["完成", mono('{"errorId": 0, "status": "ready", "solution": {"token": "…", "userAgent": "…"}}')],
+          ["失败", mono('{"errorId": 1, "errorCode": "ERROR_CAPTCHA_UNSOLVABLE", "errorDescription": "…"}')],
+        ]),
+        para("solution.token 即 Turnstile token(提交到站点的 cf-turnstile-response)，只能使用一次，有效期 300 秒；solution.userAgent 为求解所用浏览器的 UA，站点校验 UA 时随请求一起带上。")),
+
+      section("balance", "查询余额",
+        endpoint("POST", "/getBalance"),
+        code(json({ clientKey: KEY })),
+        para("响应"),
+        code(json({ errorId: 0, errorCode: "", errorDescription: "", balance: 100 }))),
+
+      section("solve", "Turnstile：同步求解",
+        endpoint("POST", "/solve"),
+        para("一次请求直接返回 token，适合不方便轮询的场景。请求头 X-API-Key 填令牌，计费与任务接口相同。"),
+        code(json({ url: "https://example.com/login", sitekey: "0x4AAAAAAA...", action: "login", timeout: 60 })),
+        simpleTable(["字段", "必填", "说明"], [
+          [mono("url"), "是", "组件所在页面的网址"],
+          [mono("sitekey"), "是", "组件的 sitekey"],
+          [mono("action"), "否", "组件的 action，最长 32 个字符"],
+          [mono("cdata"), "否", "组件的 cData，最长 255 个字符"],
+          [mono("proxy"), "否", "http://user:pass@host:port 或 socks5://host:port"],
+          [mono("timeout"), "否", "总超时(秒)，默认 60，最大 85"],
+        ]),
+        para("响应"),
+        code(json({ token: "0.xxxxx…", elapsed: 18.2, attempts: 1, user_agent: "Mozilla/5.0 …" })),
+        para("出错时返回 {\"status\": \"error\", \"code\": \"…\", \"message\": \"…\"},HTTP 状态码见「错误码」。")),
+
+      v1 && section("challenge", "5 秒盾：/v1",
+        endpoint("POST", "/v1"),
+        para("用真实浏览器打开页面，自动通过 Cloudflare 验证页(5 秒盾)，返回页面内容、cookies(含 cf_clearance)和 User-Agent。请求与响应格式同 FlareSolverr v3。"),
+        code(json({ cmd: "request.get", url: "https://目标站点/", maxTimeout: 60000 })),
+        simpleTable(["字段", "必填", "说明"], [
+          [mono("cmd"), "是", "request.get 或 request.post"],
+          [mono("url"), "是", "要打开的网址"],
+          [mono("maxTimeout"), "否", "最长等待(毫秒)，默认 60000，最大 85000"],
+          [mono("postData"), "request.post 必填", "表单字符串(application/x-www-form-urlencoded)，例如 a=1&b=2"],
+          [mono("cookies"), "否", '打开前写入的 cookie，例如 [{"name": "a", "value": "1"}]'],
+          [mono("proxy"), "否", '{"url": "http://host:port", "username": "user", "password": "pass"}'],
+          [mono("returnOnlyCookies"), "否", "true 时不返回页面内容，只返回 cookies"],
+          [mono("returnScreenshot"), "否", "true 时返回页面截图(Base64 PNG)"],
+          [mono("waitInSeconds"), "否", "通过验证后再等待的秒数，用于加载动态内容"],
+          [mono("disableMedia"), "否", "true 时不加载图片、CSS、字体，速度更快"],
+        ]),
+        para("响应"),
+        code(json({
+          status: "ok", message: "Challenge solved!", startTimestamp: 1760000000000, endTimestamp: 1760000014000,
+          solution: {
+            url: "https://目标站点/", status: 200, response: "<html>…</html>",
+            cookies: [{ name: "cf_clearance", value: "…", domain: ".目标站点", path: "/", expires: 1760003600, httpOnly: true, secure: true }],
+            userAgent: "Mozilla/5.0 …",
+          },
+        })),
+        simpleTable(["说明", "内容"], [
+          ["耗时", "通常 3–15 秒；同一站点同时发很多请求会明显变慢，建议拿到 cookie 后复用"],
+          ["复用 cookie", "cf_clearance 与出口 IP、User-Agent 绑定：请求时带 proxy，之后用同一代理、响应里的 userAgent 和 cookies 访问"],
+          ["失败", "返回 {\"status\": \"error\", \"message\": \"…\"}(HTTP 500)，不扣积分"],
+          ["限制", "令牌只支持不带 session 的 request.get / request.post"],
+        ])),
+
+      section("examples", "示例",
+        tabs(turnstileExamples),
+        v1 ? para("5 秒盾(Python)") : null,
+        v1 ? code(challengeExample) : null),
+
+      section("errors", "错误码",
+        para("任务接口(createTask、getTaskResult、getBalance)始终返回 HTTP 200，用 errorId / errorCode 表示结果："),
+        simpleTable(["errorCode", "说明"], [
+          ["ERROR_KEY_DOES_NOT_EXIST", "令牌错误、已禁用或已过期"],
+          ["ERROR_ZERO_BALANCE", "积分或令牌额度不足"],
+          ["ERROR_TASK_NOT_SUPPORTED", "不支持的任务类型"],
+          ["ERROR_INVALID_TASK_DATA", "缺少 websiteURL / websiteKey，或代理格式错误"],
+          ["ERROR_NO_SLOT_AVAILABLE", "繁忙，稍后重试"],
+          ["ERROR_TASKID_INVALID", "taskId 不存在或已过期"],
+          ["ERROR_CAPTCHA_UNSOLVABLE", "求解失败(sitekey 与网址不匹配、超时等)，不扣积分"],
+          ["ERROR_SERVICE_UNAVALIABLE", "服务暂不可用，稍后重试"],
+        ].map(([c, d]) => [mono(c), d])),
+        para(`${v1 ? "/solve 与 /v1" : "/solve"} 用 HTTP 状态码表示错误：`),
+        simpleTable(["状态码", "说明"], [
+          ["400", "请求格式错误"],
+          ["401", "缺少或错误的令牌"],
+          ["402", "积分或令牌额度不足"],
+          v1 ? ["403", "令牌不支持该命令(/v1 的 session 相关命令)，或功能未开放"] : null,
+          ["422", "参数校验失败，或 Turnstile 返回错误(sitekey 与域名不匹配)"],
+          ["429", "繁忙，稍后重试"],
+          ["500", "求解失败或超时，不扣积分"],
+          ["503", "服务暂不可用，稍后重试"],
+        ].filter(Boolean))),
+
+      section("faq", "常见问题",
+        simpleTable(["问题", "说明"], [
+          ["拿到 token 但站点验证失败", "检查 websiteURL 的域名与 sitekey 是否匹配；站点设置了 action / cData 时必须一致；token 只能用一次且 300 秒内有效"],
+          ["站点校验 IP 或 UA", "用 TurnstileTask 带你的代理，提交时使用 solution.userAgent"],
+          ["失败会扣积分吗", "不会。失败、超时、10 分钟内未取结果的任务都会自动退还"],
+          ["返回繁忙", "当前所有求解名额已满，稍后重试；负载高时会自动增加机器，约 2–3 分钟生效"],
+          v1 ? ["5 秒盾 cookie 在本地无效", "cf_clearance 与出口 IP、UA 绑定，见「5 秒盾」的复用说明"] : null,
+        ].filter(Boolean))),
+    ].filter(Boolean));
+
+    toc.append(h("div", { class: "toolbar", style: "gap:6px" }, sections.map(([id, title, el]) =>
+      h("button", { class: "btn sm", type: "button", onclick: () => el.scrollIntoView({ behavior: "smooth", block: "start" }) }, title))));
+  }
+
+  // ---------------------------------------------------------------- 个人设置
+  async function pagePersonal(root) {
+    me = await api("GET", "/api/user/self");
+    const [roleName, roleColor] = ROLE_TAG[me.role] || ["用户", ""];
+    const oldPass = h("input", { class: "input", type: "password", autocomplete: "current-password", required: me.has_password });
+    const newPass = h("input", { class: "input", type: "password", autocomplete: "new-password", minlength: 8, required: true });
+    const again = h("input", { class: "input", type: "password", autocomplete: "new-password", required: true });
+    const save = h("button", { class: "btn primary", type: "submit" }, me.has_password ? "修改密码" : "设置密码");
+    root.append(pageHeader("个人设置"), h("div", { class: "two" },
+      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "账号")),
+        h("dl", { class: "card-bd kv" },
+          h("dt", {}, "用户名"), h("dd", {}, me.username),
+          h("dt", {}, "角色"), h("dd", {}, tag(roleName, roleColor)),
+          h("dt", {}, "注册时间"), h("dd", {}, fmtTime(me.created_at)),
+          h("dt", {}, "最后登录"), h("dd", {}, fmtTime(me.last_login_at)),
+          h("dt", {}, "GitHub"), h("dd", {}, githubCell()))),
+      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, me.has_password ? "修改密码" : "设置密码")),
+        h("form", { class: "card-bd form", onsubmit: async (e) => {
+          e.preventDefault();
+          if (newPass.value !== again.value) return toast("两次输入的密码不一致", true);
+          save.disabled = true;
+          try {
+            await api("PUT", "/api/user/password", { old_password: oldPass.value, password: newPass.value });
+            oldPass.value = newPass.value = again.value = "";
+            toast("密码已保存");
+            if (!me.has_password) route();
+          } catch (err) { toast(err.message, true); } finally { save.disabled = false; }
+        } }, me.has_password ? field("原密码", oldPass) : null, field("新密码", newPass, "8–64 位"), field("确认新密码", again), save))));
+  }
+  function githubCell() {
+    if (me.github_login) {
+      return h("span", { class: "toolbar", style: "gap:8px" }, tag(me.github_login, "blue"),
+        h("button", { class: "btn link danger", type: "button", onclick: () => confirmModal("解绑 GitHub", `解绑 ${me.github_login}?`, async () => {
+          await api("POST", "/api/user/github/unbind", {});
+          toast("已解绑");
+          route();
+        }) }, "解绑"));
+    }
+    if (!sys.github_oauth) return h("span", { class: "t3" }, "未启用");
+    return h("a", { class: "btn sm", href: "/api/oauth/github?bind=1" }, icon("github"), "绑定");
+  }
+
+  // ---------------------------------------------------------------- 渠道(worker)
+  function workerState(s) {
+    if (!s || s.error) return { color: "red", text: "离线" };
+    const phase = s.agent && s.agent.phase;
+    if (phase === "draining" || phase === "drained") return { color: "orange", text: "下线中" };
+    if (phase === "failed") return { color: "red", text: "失败" };
+    if (phase === "starting") return { color: "orange", text: "启动中" };
+    if (s.health && s.health.status === "ok") return { color: "green", text: "正常" };
+    return { color: "orange", text: "降级" };
+  }
+  const latencyTag = (ms) => (ms == null ? tag("—") : tag(`${ms} ms`, ms < 800 ? "green" : ms < 2000 ? "orange" : "red"));
+  const shortReason = (k) => k.replace(/^[a-z_]+: /, "").replace(/^未能在限定时间内拿到 token/, "超时").replace(/^无法在目标域名上加载 Turnstile 组件/, "页面加载失败");
+  const cpuSamples = {};
+  function commandBox(command) {
+    return h("div", { class: "code" }, h("pre", { style: "white-space:pre-wrap;word-break:break-all" }, h("code", {}, command)),
+      h("button", { class: "btn icon copy", type: "button", title: "复制", onclick: () => copyText(command) }, icon("copy")));
+  }
+  function installModal(title, command, slot, onReset) {
+    const box = h("div", {}, commandBox(command));
+    modal(title, h("div", { class: "form" },
+      h("div", { class: "t2" }, "在服务器上以 root 执行。会安装 Docker(如需要)、拉取镜像并启动;重复执行即升级。国内服务器可在末尾加 --cn。"),
+      box,
+      slot ? h("div", {}, h("button", { class: "btn sm", type: "button", onclick: () => confirmModal("重置安装令牌", "旧命令将失效，已安装的服务器不受影响。", async () => {
+        const r = await api("POST", `/api/admin/channels/${slot}/token`, {});
+        box.replaceChildren(commandBox(r.install_command));
+        if (onReset) await onReset();
+      }) }, "重置令牌")) : null), { footer: false });
+  }
+  async function serverChannels(card, onChange) {
+    const data = await api("GET", "/api/admin/channels");
+    const add = h("button", { class: "btn primary", type: "button", disabled: !data.cf_ready, onclick: () => {
+      const name = h("input", { class: "input", maxlength: 30, placeholder: "例如 香港-1" });
+      modal("添加服务器", h("div", { class: "form" }, field("名称", name),
+        h("span", { class: "hint" }, "将自动创建 Cloudflare 隧道和 solver-<位置>.000.moe 域名")), {
+        onOk: async () => {
+          const r = await api("POST", "/api/admin/channels", { name: name.value.trim() });
+          await onChange();
+          installModal(`安装 ${r.name}(${r.slot.toUpperCase()})`, r.install_command, r.slot, onChange);
+        },
+      });
+    } }, icon("plus"), "添加服务器");
+    const rows = data.items;
+    card.replaceChildren(
+      h("div", { class: "card-hd", style: "padding-bottom:14px" }, h("h3", {}, "服务器"),
+        h("div", { class: "toolbar" }, data.cf_ready ? null : h("span", { class: "t3" }, "先在「系统设置」填写 Cloudflare API Token"), add)),
+      table([
+        { title: "位置", render: (r) => h("div", { class: "slot-badge" }, r.slot) },
+        { title: "名称", render: (r) => r.name },
+        { title: "域名", render: (r) => h("span", { class: "mono" }, r.host) },
+        { title: "状态", render: (r) => statusTag(r.status) },
+        { title: "创建时间", render: (r) => fmtTime(r.created_at) },
+        { title: "操作", render: (r) => h("div", { class: "ops" },
+          h("button", { class: "btn link", type: "button", onclick: () => installModal(`安装 ${r.name}(${r.slot.toUpperCase()})`, r.install_command, r.slot, onChange) }, "安装命令"),
+          h("button", { class: "btn link", type: "button", onclick: async () => { try { await api("PUT", `/api/admin/channels/${r.slot}`, { status: r.status === 1 ? 2 : 1 }); await onChange(); } catch (e) { toast(e.message, true); } } }, r.status === 1 ? "禁用" : "启用"),
+          h("button", { class: "btn link danger", type: "button", onclick: () => confirmModal("删除服务器渠道", `删除「${r.name}」?同时删除它的 Cloudflare 隧道和域名，服务器上的程序会断开(可在服务器上执行 install.sh --uninstall 卸载)。`, async () => {
+            const res = await api("DELETE", `/api/admin/channels/${r.slot}`);
+            toast(res.warning || "已删除", Boolean(res.warning));
+            await onChange();
+          }) }, "删除")) },
+      ], rows, "还没有服务器渠道"));
+  }
+
+  async function pageChannel(root) {
+    const card = h("div", { class: "card" });
+    const servers = h("div", { class: "card" });
+    const chart = h("div", { class: "card-bd chart" });
+    root.append(pageHeader("渠道", h("button", { class: "btn", type: "button", onclick: () => load().catch((e) => toast(e.message, true)) }, icon("refresh"), "刷新")), card, servers,
+      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "60 分钟"),
+        h("div", { class: "legend" }, h("span", {}, h("i", { style: "background:var(--primary)" }), "成功"), h("span", {}, h("i", { style: "background:var(--red)" }), "失败"))), chart));
+    const load = async () => {
+      const f = await api("GET", "/api/admin/fleet");
+      const now = f.fetched_at;
+      const minutes = new Map();
+      const rows = Object.entries(f.slots).map(([slot, s]) => {
+        const hl = s && !s.error && s.health;
+        let cpu = null;
+        if (hl && hl.cpu_seconds != null) {
+          const prev = cpuSamples[slot];
+          if (prev && prev.worker === hl.worker && now > prev.at) cpu = Math.max(0, Math.round(((hl.cpu_seconds - prev.cpu) / (now - prev.at) / (hl.cpu_limit || 1)) * 100));
+          cpuSamples[slot] = { worker: hl.worker, cpu: hl.cpu_seconds, at: now };
+        }
+        for (const [m, ok, fail] of (s && s.minutes) || []) {
+          const b = minutes.get(m) || { ok: 0, fail: 0 };
+          b.ok += ok; b.fail += fail;
+          minutes.set(m, b);
+        }
+        return { slot, s, hl, cpu };
+      });
+      card.replaceChildren(table([
+        { title: "位置", render: (r) => h("div", { class: "slot-badge" }, r.slot) },
+        { title: "类型", render: (r) => (r.s && r.s.kind === "server" ? tag(r.s.name || "服务器", "violet") : tag("CNB", "cyan")) },
+        { title: "Worker", render: (r) => h("span", { class: "mono" }, r.hl && r.hl.worker ? r.hl.worker.split("/")[0] : "—") },
+        { title: "状态", render: (r) => { if (r.s && r.s.disabled) return tag("已禁用"); const st = workerState(r.s); return dotTag(st.text, st.color); } },
+        { title: "版本", render: (r) => (r.s && r.s.agent && r.s.agent.fleet_version ? tag(`v${r.s.agent.fleet_version}`, "blue", r.s.agent.commit || "") : r.s && r.s.legacy ? tag("旧版") : "—") },
+        { title: "运行", render: (r) => { const a = r.s && r.s.agent; return a && a.started_at ? duration(now - Date.parse(a.started_at) / 1000) : "—"; } },
+        { title: "轮换", render: (r) => { const a = r.s && r.s.agent; if (!a || !a.drain_at) return "—"; const t = Date.parse(a.drain_at) / 1000; return t > now ? duration(t - now) : "进行中"; } },
+        { title: "并发", render: (r) => (r.hl ? h("span", {}, h("span", { class: "bar" }, h("span", { style: `width:${Math.min(100, (r.hl.active / (r.hl.capacity || 1)) * 100)}%` })), `${r.hl.active}/${r.hl.capacity}`, r.hl.queued ? h("span", { class: "t2" }, ` +${r.hl.queued}`) : null) : "—") },
+        { title: "成功", num: true, render: (r) => (r.hl ? num(r.hl.solved) : "—") },
+        { title: "失败", num: true, render: (r) => (r.hl ? h("span", { class: r.hl.solve_failed ? "neg" : null }, num(r.hl.solve_failed)) : "—") },
+        { title: "CPU", num: true, render: (r) => (r.cpu == null ? "—" : `${r.cpu}%`) },
+        { title: "内存", num: true, render: (r) => (r.hl && r.hl.mem_used_mb != null ? `${(r.hl.mem_used_mb / 1024).toFixed(1)}G` : "—") },
+        { title: "响应", render: (r) => (r.s && !r.s.error ? latencyTag(r.s.latency) : h("span", { class: "err-text" }, (r.s && r.s.error) || "—")) },
+        { title: "失败尝试", wrap: true, render: (r) => {
+          const reasons = Object.entries((r.hl && r.hl.attempt_errors) || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+          return reasons.length ? h("div", { class: "toolbar", style: "gap:4px" }, reasons.map(([k, v]) => tag(`${shortReason(k)} ×${v}`, "orange", k))) : "—";
+        } },
+      ], rows));
+      const end = Math.floor(now / 60) * 60;
+      const buckets = [];
+      for (let i = 59; i >= 0; i--) {
+        const m = end - i * 60;
+        const b = minutes.get(m) || { ok: 0, fail: 0 };
+        buckets.push({ t: m, ok: b.ok, fail: b.fail });
+      }
+      chart.replaceChildren(barChart(buckets, { label: (b) => clock(b.t) }));
+    };
+    const loadServers = () => serverChannels(servers, async () => { await loadServers(); await load(); });
+    await Promise.all([load(), loadServers()]);
+    every(15, load);
+  }
+
+  // ---------------------------------------------------------------- 用户管理
+  function userModal(user, onSaved) {
+    const username = h("input", { class: "input", value: user ? user.username : "", disabled: Boolean(user), autocomplete: "off" });
+    const password = h("input", { class: "input", type: "password", autocomplete: "new-password", placeholder: user ? "不修改请留空" : "" });
+    const quota = h("input", { class: "input", type: "number", min: 0, step: 1, value: user ? user.quota : 0 });
+    const role = h("select", { class: "select" }, h("option", { value: 1 }, "普通用户"), h("option", { value: 10 }, "管理员"));
+    role.value = String(user ? Math.min(user.role, 10) : 1);
+    const canRole = me.role === ROLE.ROOT && (!user || (user.id !== me.id && user.role < ROLE.ROOT));
+    const quickAdd = (n) => h("button", { class: "btn sm", type: "button", onclick: () => { quota.value = (Number(quota.value) || 0) + n; } }, `+${num(n)}`);
+    modal(user ? "编辑用户" : "添加用户", h("div", { class: "form" },
+      field("用户名", username),
+      field("密码", password, user ? null : "8–64 位"),
+      canRole ? field("角色", role) : null,
+      field("积分", quota),
+      h("div", { class: "toolbar" }, quickAdd(100), quickAdd(1000), quickAdd(10000))), {
+      onOk: async () => {
+        const body = { quota: Number(quota.value) || 0 };
+        if (password.value) body.password = password.value;
+        if (canRole) body.role = Number(role.value);
+        if (user) await api("PUT", `/api/admin/user/${user.id}`, body);
+        else await api("POST", "/api/admin/user", { ...body, username: username.value.trim(), password: password.value });
+        toast(user ? "已保存" : "已创建");
+        await onSaved();
+      },
+    });
+  }
+  async function pageUsers(root) {
+    const keyword = h("input", { class: "input", placeholder: "搜索用户名" });
+    const card = h("div", { class: "card" });
+    let reload;
+    root.append(pageHeader("用户管理", keyword, h("button", { class: "btn primary", type: "button", onclick: () => userModal(null, () => reload(1)) }, icon("plus"), "添加用户")), card);
+    const canManage = (u) => u.id === me.id || me.role > u.role;
+    reload = listView(card, (p) => api("GET", `/api/admin/user?p=${p}&size=${PAGE_SIZE}&keyword=${encodeURIComponent(keyword.value.trim())}`), [
+      { title: "ID", render: (u) => u.id },
+      { title: "用户名", render: (u) => u.username },
+      { title: "GitHub", render: (u) => u.github_login || "—" },
+      { title: "角色", render: (u) => { const [n, c] = ROLE_TAG[u.role] || ["用户", ""]; return tag(n, c); } },
+      { title: "状态", render: (u) => statusTag(u.status) },
+      { title: "余额", num: true, render: (u) => num(u.quota) },
+      { title: "已用", num: true, render: (u) => num(u.used_quota) },
+      { title: "请求", num: true, render: (u) => num(u.request_count) },
+      { title: "创建时间", render: (u) => fmtTime(u.created_at) },
+      { title: "操作", render: (u) => (canManage(u) ? h("div", { class: "ops" },
+        h("button", { class: "btn link", type: "button", onclick: () => userModal(u, () => reload()) }, "编辑"),
+        u.role < ROLE.ROOT && u.id !== me.id ? h("button", { class: "btn link", type: "button", onclick: async () => { try { await api("PUT", `/api/admin/user/${u.id}`, { status: u.status === 1 ? 2 : 1 }); await reload(); } catch (e) { toast(e.message, true); } } }, u.status === 1 ? "禁用" : "启用") : null,
+        u.role < ROLE.ROOT && u.id !== me.id ? h("button", { class: "btn link danger", type: "button", onclick: () => confirmModal("删除用户", `删除「${u.username}」及其全部令牌?`, async () => { await api("DELETE", `/api/admin/user/${u.id}`); toast("已删除"); await reload(); }) }, "删除") : null) : "—") },
+    ]);
+    keyword.addEventListener("input", () => reload(1).catch((e) => toast(e.message, true)));
+    await reload(1);
+  }
+
+  // ---------------------------------------------------------------- 兑换码
+  function redemptionModal(onSaved) {
+    const name = h("input", { class: "input", maxlength: 20 });
+    const quota = h("input", { class: "input", type: "number", min: 1, step: 1, value: 1000 });
+    const count = h("input", { class: "input", type: "number", min: 1, max: 100, step: 1, value: 1 });
+    modal("添加兑换码", h("div", { class: "form" }, field("名称", name), field("积分", quota), field("数量", count, "1–100")), {
+      onOk: async () => {
+        const keys = await api("POST", "/api/admin/redemption", { name: name.value.trim(), quota: Number(quota.value), count: Number(count.value) });
+        await onSaved();
+        const text = keys.join("\n");
+        modal("兑换码", h("div", { class: "form" }, h("textarea", { class: "input mono", rows: Math.min(10, keys.length + 1), readonly: true }, text)), {
+          okText: "复制全部", onOk: () => copyText(text),
+        });
+      },
+    });
+  }
+  async function pageRedemptions(root) {
+    const keyword = h("input", { class: "input", placeholder: "搜索名称" });
+    const card = h("div", { class: "card" });
+    let reload;
+    root.append(pageHeader("兑换码", keyword, h("button", { class: "btn primary", type: "button", onclick: () => redemptionModal(() => reload(1)) }, icon("plus"), "添加兑换码")), card);
+    reload = listView(card, (p) => api("GET", `/api/admin/redemption?p=${p}&size=${PAGE_SIZE}&keyword=${encodeURIComponent(keyword.value.trim())}`), [
+      { title: "ID", render: (r) => r.id },
+      { title: "名称", render: (r) => r.name },
+      { title: "状态", render: (r) => { const [n, c] = REDEEM_STATUS[r.status] || ["未知", ""]; return tag(n, c); } },
+      { title: "积分", num: true, render: (r) => num(r.quota) },
+      { title: "创建时间", render: (r) => fmtTime(r.created_at) },
+      { title: "兑换人", render: (r) => r.used_by_name || "—" },
+      { title: "兑换时间", render: (r) => fmtTime(r.redeemed_at) },
+      { title: "操作", render: (r) => h("div", { class: "ops" },
+        h("button", { class: "btn link", type: "button", onclick: () => copyText(r.key) }, "复制"),
+        r.status !== 3 ? h("button", { class: "btn link", type: "button", onclick: async () => { try { await api("PUT", `/api/admin/redemption/${r.id}`, { status: r.status === 1 ? 2 : 1 }); await reload(); } catch (e) { toast(e.message, true); } } }, r.status === 1 ? "禁用" : "启用") : null,
+        h("button", { class: "btn link danger", type: "button", onclick: () => confirmModal("删除兑换码", `删除「${r.name}」?`, async () => { await api("DELETE", `/api/admin/redemption/${r.id}`); toast("已删除"); await reload(); }) }, "删除")) },
+    ]);
+    keyword.addEventListener("input", () => reload(1).catch((e) => toast(e.message, true)));
+    await reload(1);
+  }
+
+  // ---------------------------------------------------------------- 系统设置
+  async function pageSettings(root) {
+    const o = await api("GET", "/api/admin/option");
+    const name = h("input", { class: "input", value: o.system_name, maxlength: 30 });
+    const price = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.price_turnstile });
+    const priceV1 = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.price_v1 });
+    const gift = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.new_user_quota });
+    const reg = switchInput(o.register_enabled === "true");
+    const v1On = switchInput(o.v1_enabled === "true");
+    const ghOn = switchInput(o.github_oauth_enabled === "true");
+    const ghId = h("input", { class: "input mono", value: o.github_client_id, autocomplete: "off" });
+    const ghSecret = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: o.github_client_secret_set ? "已设置，留空不修改" : "" });
+    const callback = `${location.origin}/api/oauth/github/callback`;
+    const cfToken = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: o.cf_api_token_set ? "已设置，留空不修改" : "" });
+    const saveCf = h("button", { class: "btn primary", type: "submit" }, "保存");
+    const save = h("button", { class: "btn primary", type: "submit" }, "保存");
+    const saveGithub = h("button", { class: "btn primary", type: "submit" }, "保存");
+    root.append(pageHeader("系统设置"), h("div", { class: "two" }, h("div", { class: "card" },
+      h("div", { class: "card-hd" }, h("h3", {}, "基础")),
+      h("form", { class: "card-bd form", onsubmit: async (e) => {
+        e.preventDefault();
+        save.disabled = true;
+        try {
+          const saved = await api("PUT", "/api/admin/option", {
+            system_name: name.value.trim(), price_turnstile: Number(price.value), price_v1: Number(priceV1.value),
+            new_user_quota: Number(gift.value), register_enabled: reg.input.checked, v1_enabled: v1On.input.checked,
+          });
+          sys.system_name = saved.system_name;
+          sys.price_turnstile = Number(saved.price_turnstile);
+          sys.register_enabled = saved.register_enabled === "true";
+          sys.v1_enabled = saved.v1_enabled === "true";
+          setSystemName(saved.system_name);
+          toast("已保存");
+        } catch (err) { toast(err.message, true); } finally { save.disabled = false; }
+      } },
+      field("系统名称", name),
+      field("求解价格", price, "积分 / 次，成功才扣"),
+      h("div", { class: "field-row" }, h("span", {}, "5 秒盾(/v1)", h("div", { class: "hint" }, "关闭后用户令牌不能调用 /v1，现有 API Key 不受影响")), v1On.el),
+      field("5 秒盾价格", priceV1, "积分 / 次，成功才扣"),
+      h("div", { class: "field-row" }, "开放注册", reg.el),
+      field("新用户赠送", gift, "积分"),
+      save)),
+      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "GitHub 登录")),
+        h("form", { class: "card-bd form", onsubmit: async (e) => {
+          e.preventDefault();
+          saveGithub.disabled = true;
+          try {
+            const saved = await api("PUT", "/api/admin/option", {
+              github_oauth_enabled: ghOn.input.checked, github_client_id: ghId.value.trim(), github_client_secret: ghSecret.value,
+            });
+            ghSecret.value = "";
+            ghSecret.placeholder = saved.github_client_secret_set ? "已设置，留空不修改" : "";
+            sys.github_oauth = saved.github_oauth_enabled === "true" && Boolean(saved.github_client_id) && saved.github_client_secret_set;
+            toast("已保存");
+          } catch (err) { toast(err.message, true); } finally { saveGithub.disabled = false; }
+        } },
+        h("div", { class: "field-row" }, "启用", ghOn.el),
+        field("Client ID", ghId),
+        field("Client Secret", ghSecret),
+        h("div", { class: "field" }, "回调地址",
+          h("span", { class: "key-cell" }, h("span", { class: "mono t2" }, callback),
+            h("button", { class: "btn icon", type: "button", title: "复制", onclick: () => copyText(callback) }, icon("copy"))),
+          h("span", { class: "hint" }, "在 GitHub → Settings → Developer settings → OAuth Apps 创建应用，回调地址填上面这个；开放注册时首次 GitHub 登录自动创建账号")),
+        saveGithub)),
+      h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "服务器渠道")),
+        h("form", { class: "card-bd form", onsubmit: async (e) => {
+          e.preventDefault();
+          saveCf.disabled = true;
+          try {
+            const saved = await api("PUT", "/api/admin/option", { cf_api_token: cfToken.value });
+            cfToken.value = "";
+            cfToken.placeholder = saved.cf_api_token_set ? "已设置，留空不修改" : "";
+            toast("已保存");
+          } catch (err) { toast(err.message, true); } finally { saveCf.disabled = false; }
+        } },
+        field("Cloudflare API Token", cfToken,
+          "用于给服务器自动创建隧道和域名。在 dash.cloudflare.com → 我的个人资料 → API 令牌 创建，权限：账户 · Cloudflare Tunnel · 编辑;区域 · DNS · 编辑;区域 · 区域 · 读取(区域选 000.moe)"),
+        saveCf))));
+  }
+
+  // ---------------------------------------------------------------- 启动
+  async function boot() {
+    applyTheme();
+    if (location.hash.startsWith("#oauth_error=")) {
+      const message = decodeURIComponent(location.hash.slice("#oauth_error=".length));
+      history.replaceState(null, "", location.pathname);
+      setTimeout(() => toast(message, true), 300);
+    }
+    try {
+      sys = await api("GET", "/api/status");
+      setSystemName(sys.system_name);
+    } catch (err) {
+      $("auth").hidden = false;
+      $("auth-title").textContent = err.message;
+      $("auth-form").hidden = true;
+      return;
+    }
+    if (sys.setup_required) return showAuth();
+    try {
+      me = await api("GET", "/api/user/self");
+      enterApp();
+    } catch {
+      if (location.hash === "#docs") showPublicDocs();
+      else showAuth();
+    }
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

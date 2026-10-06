@@ -1,0 +1,42 @@
+# Cloudflare Worker(solver-lb)的部署配置
+#   npx wrangler@4 deploy --config deploy/wrangler.toml
+# 回退到上一个版本:npx wrangler@4 rollback --config deploy/wrangler.toml
+name = "solver-lb"
+main = "cf-worker.js"
+compatibility_date = "2026-10-01"
+account_id = "7e91b0eadb038a578d12d625c9ed006b"
+
+# 只通过路由提供服务。workers.dev 地址上的请求会把位置 a 解析成 workers.dev 自身,没有意义,关闭
+workers_dev = false
+preview_urls = false
+
+routes = [
+  { pattern = "solver.000.moe/*", zone_name = "000.moe" },
+]
+
+# 控制台页面(deploy/admin.html)以文本模块导入
+rules = [
+  { type = "Text", globs = ["**/*.html"], fallthrough = true },
+]
+
+# 用户、令牌、积分与日志。建表:npx wrangler@4 d1 migrations apply solver-db --remote --config deploy/wrangler.toml
+[[d1_databases]]
+binding = "DB"
+database_name = "solver-db"
+database_id = "d252216e-49b6-4ba2-9153-92426ee4422b"
+migrations_dir = "migrations"
+
+# worker 全部繁忙时触发轮换器扩容;访问令牌用 Worker 密钥 CNB_TOKEN(wrangler secret put CNB_TOKEN)
+[vars]
+CNB_REPO = "AzusaMoe/turnstile-solver"
+# 服务器渠道:隧道建在这个账户下,主机名为 solver-<位置>.<CHANNEL_ZONE>;安装脚本来自公开仓库
+CF_ACCOUNT_ID = "7e91b0eadb038a578d12d625c9ed006b"
+CHANNEL_ZONE = "000.moe"
+INSTALL_SCRIPT_URL = "https://raw.githubusercontent.com/TomorrowX6/solver/main/install.sh"
+
+# 每 5 分钟退还超时未结算的任务、清理过期会话
+[triggers]
+crons = ["*/5 * * * *"]
+
+[observability]
+enabled = true

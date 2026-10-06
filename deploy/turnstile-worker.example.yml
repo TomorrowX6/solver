@@ -1,0 +1,6 @@
+# 放到密钥仓库 AzusaMoe/secrets 根目录,文件名 turnstile-worker.yml
+TUNNEL_TOKEN: "eyJhIjoi...隧道 A 的令牌(完整一整串)"
+TUNNEL_TOKEN_B: "eyJhIjoi...隧道 B 的令牌"
+TUNNEL_TOKEN_C: "eyJhIjoi...隧道 C 的令牌"
+TUNNEL_TOKEN_D: "eyJhIjoi...隧道 D 的令牌"
+TS_API_KEY: "自定义的随机串,客户端调用时放在 X-API-Key 头里"

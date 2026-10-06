@@ -1,0 +1,19 @@
+# Turnstile 测试站点
+#   npx wrangler@4 deploy --config testsite/wrangler.toml
+#   npx wrangler@4 secret put TURNSTILE_SECRET --config testsite/wrangler.toml
+name = "turnstile-test"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+account_id = "7e91b0eadb038a578d12d625c9ed006b"
+
+workers_dev = false
+preview_urls = false
+
+# 自定义域名:部署时自动创建 DNS 记录与证书
+routes = [
+  { pattern = "turnstile-test.000.moe", custom_domain = true },
+]
+
+[vars]
+# Turnstile 组件的 sitekey(公开值);secret 用 wrangler secret 设置,不写在这里
+SITEKEY = "0x4AAAAAAFOHjH25VeE99l9D"
