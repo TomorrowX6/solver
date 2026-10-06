@@ -226,6 +226,7 @@ npx wrangler@4 deploy --config deploy/wrangler.toml
 区域 · DNS · 编辑;区域 · 区域 · 读取,区域选 000.moe)。添加服务器时 Worker 用它建隧道与 DNS 记录;
 安装脚本用安装令牌从 `/api/channel/config` 取得位置、隧道令牌与 API Key。镜像由 GitHub 公开仓库
 TomorrowX6/solver 的 Actions(`.github/workflows/image.yml`、`docker-bake.hcl`)构建。
+GitHub 上的历史与 CNB 独立,更新时用 `scripts/publish-github.sh "说明"` 把 main 的当前代码作为一个新提交同步过去。
 
 GitHub 登录:在 GitHub → Settings → Developer settings → OAuth Apps 新建应用,Homepage 填 `https://solver.000.moe`,
 回调地址填 `https://solver.000.moe/api/oauth/github/callback`,再把 Client ID / Secret 填到控制台「系统设置」。
