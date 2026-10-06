@@ -1257,14 +1257,27 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
     return h("div", { class: "code" }, h("pre", { style: "white-space:pre-wrap;word-break:break-all" }, h("code", {}, command)),
       h("button", { class: "btn icon copy", type: "button", title: "复制", onclick: () => copyText(command) }, icon("copy")));
   }
+  const INSTALL_MODES = {
+    docker: { label: "Docker", flag: "", hint: "在服务器上以 root 执行。会安装 Docker(如需要)、拉取镜像并启动，重复执行即升级。国内服务器可在末尾加 --cn。" },
+    native: { label: "不用 Docker", flag: " --no-docker", hint: "在服务器上以 root 执行。直接安装 Chromium、Python 与 cloudflared，并注册为 systemd 服务，重复执行即升级。需要 Debian / Ubuntu 系统；Ubuntu 只支持 amd64。" },
+  };
   function installModal(title, command, slot, onReset) {
-    const box = h("div", {}, commandBox(command));
-    modal(title, h("div", { class: "form" },
-      h("div", { class: "t2" }, "在服务器上以 root 执行。会安装 Docker(如需要)、拉取镜像并启动;重复执行即升级。国内服务器可在末尾加 --cn。"),
-      box,
+    let mode = "docker";
+    const hint = h("div", { class: "t2" });
+    const box = h("div");
+    const seg = h("div", { class: "seg" });
+    const render = () => {
+      seg.replaceChildren(...Object.entries(INSTALL_MODES).map(([key, m]) =>
+        h("button", { type: "button", class: key === mode ? "active" : null, onclick: () => { mode = key; render(); } }, m.label)));
+      hint.textContent = INSTALL_MODES[mode].hint;
+      box.replaceChildren(commandBox(command + INSTALL_MODES[mode].flag));
+    };
+    render();
+    modal(title, h("div", { class: "form" }, h("div", {}, seg), hint, box,
       slot ? h("div", {}, h("button", { class: "btn sm", type: "button", onclick: () => confirmModal("重置安装令牌", "旧命令将失效，已安装的服务器不受影响。", async () => {
         const r = await api("POST", `/api/admin/channels/${slot}/token`, {});
-        box.replaceChildren(commandBox(r.install_command));
+        command = r.install_command;
+        render();
         if (onReset) await onReset();
       }) }, "重置令牌")) : null), { footer: false });
   }

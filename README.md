@@ -127,6 +127,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/TomorrowX6/solver/main/insta
 国内服务器加 `--cn` 用阿里云镜像安装 Docker。服务器常驻运行,不参与 CNB 的轮换与扩缩;
 在控制台禁用渠道后不再分配新任务,删除渠道会同时删除它的隧道和域名。
 
+不想用 Docker 时在命令末尾加 `--no-docker`(安装窗口里可切换):直接在系统上安装浏览器、Python 3.11(uv 管理)、
+FlareSolverr v3.5.2(打与镜像相同的补丁)和 cloudflared,装到 `/opt/turnstile-solver`,以 `turnstile` 用户运行 systemd 服务
+`turnstile-solver`。需要 Debian / Ubuntu 系(apt + systemd):系统源有 Chromium 时用它(Debian,amd64 / arm64),
+没有时装 Google Chrome 和同版本的 chromedriver(Ubuntu,只支持 amd64)。浏览器包用 `apt-mark hold` 锁定版本,
+避免自动更新后与 chromedriver 不匹配,重新执行安装命令即解锁并升级。日志:`journalctl -u turnstile-solver`、
+`/opt/turnstile-solver/state/*.log`(logrotate 每天轮转)。同一台服务器换用另一种方式安装时,脚本会先删掉原来的容器或服务。
+
 ### `GET /health`
 
 `status`、`backend`(FlareSolverr)、`solver`(sitekey 求解器,不可用时 `solver_error` 给出原因,初始化失败会在后台每 15 秒重试)、`active` / `queued` / `rejected`、`tasks_pending`、`sessions`,

@@ -224,7 +224,8 @@ npx wrangler@4 deploy --config deploy/wrangler.toml
 
 服务器渠道:控制台「系统设置 → 服务器渠道」填写 Cloudflare API Token(权限:账户 · Cloudflare Tunnel · 编辑;
 区域 · DNS · 编辑;区域 · 区域 · 读取,区域选 000.moe)。添加服务器时 Worker 用它建隧道与 DNS 记录;
-安装脚本用安装令牌从 `/api/channel/config` 取得位置、隧道令牌与 API Key。镜像由 GitHub 公开仓库
+安装脚本用安装令牌从 `/api/channel/config` 取得位置、隧道令牌与 API Key;`--no-docker` 时不用镜像,
+按 `.ide/Dockerfile` 的内容在系统上直接安装(FlareSolverr 版本与补丁写在 `install.sh` 里,升级基础镜像时同步修改)。镜像由 GitHub 公开仓库
 TomorrowX6/solver 的 Actions(`.github/workflows/image.yml`、`docker-bake.hcl`)构建。
 GitHub 上的历史与 CNB 独立,更新时用 `scripts/publish-github.sh "说明"` 把 main 的当前代码作为一个新提交同步过去。
 
