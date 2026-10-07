@@ -127,7 +127,7 @@
   .nav:hover { background: var(--fill); color: var(--text); }
   .nav.active { background: var(--primary-light); color: var(--primary); }
   .content { flex: 1; min-width: 0; padding: 20px 24px 32px; overflow-y: auto; }
-  .page { display: grid; gap: 16px; max-width: 1400px; }
+  .page { display: grid; gap: 16px; max-width: 1400px; grid-template-columns: minmax(0, 1fr); }
   .page-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .page-hd h2 { font-size: 18px; }
 
@@ -155,7 +155,7 @@
   .seg { display: inline-flex; background: var(--fill); border-radius: 6px; padding: 2px; }
   .seg button { border: 0; background: transparent; height: 26px; padding: 0 12px; border-radius: 5px; cursor: pointer; color: var(--text2); font-weight: 600; }
   .seg button.active { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
-  .list { display: grid; gap: 2px; grid-template-columns: minmax(0, 1fr); } /* 列宽不随不换行的长文本撑开 */
+  .list { display: grid; gap: 2px; grid-template-columns: minmax(0, 1fr); }
   .list-row { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-radius: 8px; }
   .list-row:hover { background: var(--fill); }
   .list-row .grow { flex: 1; min-width: 0; }
@@ -190,17 +190,19 @@
   .pg:disabled { opacity: .4; cursor: default; background: transparent; }
   .bar { height: 6px; width: 64px; border-radius: 3px; background: var(--fill); overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px; }
   .bar > span { display: block; height: 100%; background: var(--primary); }
-  .key-cell { display: inline-flex; align-items: center; gap: 4px; }
+  .key-cell { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+  .key-cell > .mono { min-width: 0; overflow-wrap: anywhere; } /* 回调地址等长 URL 在窄屏上折行 */
 
-  .form { display: grid; gap: 14px; }
-  .field { display: grid; gap: 6px; font-weight: 600; font-size: 13px; }
+  /* 单列 grid 的列宽默认按最长的不换行内容撑开(手机上会超出卡片),统一限制为容器宽度 */
+  .form { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+  .field { display: grid; gap: 6px; font-weight: 600; font-size: 13px; grid-template-columns: minmax(0, 1fr); }
   .field .input, .field .select { width: 100%; font-weight: 400; }
   .field-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; font-size: 13px; }
   .hint { font-weight: 400; font-size: 12px; color: var(--text3); }
   .toggles { display: flex; flex-wrap: wrap; gap: 8px 24px; font-weight: 400; }
   .toggles > span { display: inline-flex; align-items: center; gap: 8px; }
   .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-  .stack { display: grid; gap: 16px; align-content: start; }
+  .stack { display: grid; gap: 16px; align-content: start; grid-template-columns: minmax(0, 1fr); }
   .token-box { word-break: break-all; background: var(--fill); border-radius: 8px; padding: 12px; max-height: 220px; overflow: auto; }
   .big-num { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
@@ -1557,7 +1559,7 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
         field("5 秒盾价格", priceV1, "积分 / 次，成功才扣"),
         h("div", { class: "field" }, "开放注册",
           h("div", { class: "toggles" }, REGISTER_METHODS.map(([key, label]) => h("span", {}, label, reg[key].el))),
-          h("span", { class: "hint" }, "关闭的方式不能注册新账号，已有账号仍可登录；GitHub 和 LINUX DO 还需在右侧启用登录")),
+          h("span", { class: "hint" }, "关闭的方式不能注册新账号，已有账号仍可登录；GitHub 和 LINUX DO 还需在各自的登录设置中启用")),
         h("div", { class: "field-row" }, h("span", {}, "仅第三方登录",
           h("div", { class: "hint" }, "登录页只显示 GitHub / LINUX DO 按钮，关闭密码登录和密码注册；开启前先在个人设置中绑定")), oauthOnlyOn.el),
         field("新用户赠送", gift, "积分"),
