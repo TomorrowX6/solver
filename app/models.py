@@ -42,12 +42,9 @@ class Health(BaseModel):
     active: int
     capacity: int
     queued: int
-    completed: int
-    failed: int
     solved: int
     solve_failed: int
     rejected: int
-    sessions: int
     tasks_pending: int = 0
     # 正在下线:不再接受新任务
     draining: bool = False

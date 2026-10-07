@@ -53,7 +53,6 @@ export async function verifyPassword(password, stored) {
 export const OPTION_DEFAULTS = {
   system_name: "Turnstile Solver",
   price_turnstile: "1", // 每次成功求解扣除的积分
-  price_v1: "1", // 每次 FlareSolverr request.get / request.post 扣除的积分
   // 开放注册:按方式分别控制;关闭的方式不能创建新账号,已有账号仍可登录
   register_password_enabled: "false",
   register_github_enabled: "false",
@@ -61,7 +60,6 @@ export const OPTION_DEFAULTS = {
   oauth_only_enabled: "false", // 仅第三方登录:关闭密码登录与密码注册,登录页只显示 GitHub / LINUX DO
   new_user_quota: "0",
   solver_key: "", // worker 的 API Key(初始化时校验后保存;也可用 Worker 密钥 SOLVER_KEY 提供)
-  v1_enabled: "true", // 5 秒盾(/v1)是否对用户令牌开放
   github_oauth_enabled: "false",
   github_client_id: "",
   github_client_secret: "",

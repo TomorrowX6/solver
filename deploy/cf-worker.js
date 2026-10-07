@@ -1,12 +1,10 @@
-// Cloudflare Worker:在多条隧道之间分流(后端为 FlareSolverr 网关),并提供用户、令牌与积分(参照 NewAPI)。
+// Cloudflare Worker:在多条隧道之间分流(后端为 Turnstile 网关),并提供用户、令牌与积分(参照 NewAPI)。
 //
 // 路由:solver.000.moe/*(用 deploy/wrangler.toml 部署)
 //
 // 对路由自身域名的子请求会直接发往源站(隧道 A),不会再次触发本 Worker;其余隧道通过各自的主机名访问。
 //   * POST /createTask:随机分流,无空闲名额时改投;POST /getTaskResult:按 taskId 第一位(位置编号)路由回原 worker;
-//   * POST /v1 带 session:按会话名哈希固定到一个位置(FlareSolverr 的会话只存在于创建它的那台);
-//     sessions.create 未指定会话名时由这里生成,保证创建与后续请求落在同一位置;
-//   * POST /v1 sessions.list:并行查询所有位置并合并;
+//   * POST /v1:5 秒盾(FlareSolverr 接口)已下线,直接返回 404;
 //   * GET /(浏览器打开,Accept 含 text/html):控制台页面,旧入口 /admin 跳转到这里;/api/*:控制台接口(见 api.js);
 //   * 其他请求:随机打乱各条隧道的顺序依次尝试,遇到可重试的结果就换下一条。
 //
@@ -23,8 +21,8 @@ const SLOT_HOSTS = { a: null, b: "solver-b.000.moe", c: "solver-c.000.moe", d: "
 // taskId 第一位是位置序号(十六进制),与 fleet/agent.py 的 SLOT_ORDER 一致
 const SLOT_ORDER = "abcdefghijklmnop";
 
-// 改投下一条隧道的情况:429 = 该 worker 槽位与排队都已满;503 = 该 worker 的 FlareSolverr 不可用;
-// 其余为 Cloudflare 生成的源站故障(530 = 隧道没有可用连接器)。FlareSolverr 的 500 等是确定结果,原样返回
+// 改投下一条隧道的情况:429 = 该 worker 槽位与排队都已满;503 = 该 worker 的求解器不可用;
+// 其余为 Cloudflare 生成的源站故障(530 = 隧道没有可用连接器)。网关的 500 等是确定结果,原样返回
 const RETRY_STATUS = new Set([429, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530]);
 
 // 打码平台风格接口(HTTP 一律 200,用 errorCode 表示错误):这些错误码说明该 worker 没处理请求,可以改投
@@ -122,16 +120,6 @@ class Relay {
     else offlineUntil.delete(slot);
   }
 
-  // FNV-1a:同一个会话名总是映射到同一个位置
-  slotFor(session) {
-    let h = 0x811c9dc5;
-    for (const ch of new TextEncoder().encode(session)) {
-      h ^= ch;
-      h = Math.imul(h, 0x01000193) >>> 0;
-    }
-    return this.slots[h % this.slots.length];
-  }
-
   forward(host, body, apiKey) {
     const target = new URL(this.url);
     target.host = host;
@@ -192,45 +180,6 @@ class Relay {
       // 连接失败,按 worker 已下线处理
     }
     return taskError("ERROR_TASKID_INVALID", "任务所在的 worker 已下线，请重新创建任务");
-  }
-
-  async listSessions(body) {
-    const results = await Promise.allSettled(this.slots.map((slot) => this.forward(this.hostOf(slot), body)));
-    const sessions = [];
-    let failed = 0;
-    for (const r of results) {
-      if (r.status !== "fulfilled" || r.value.status !== 200) {
-        failed++;
-        continue;
-      }
-      const data = await r.value.json();
-      if (data.status === "ok") sessions.push(...(data.sessions || []));
-    }
-    if (failed === this.slots.length) return error(503, "backend_unavailable", "所有 worker 均不可用");
-    return Response.json({ status: "ok", message: failed ? `${failed} 个 worker 未响应` : "", sessions });
-  }
-
-  // FlareSolverr 原生接口(不计费路径):会话绑定位置,sessions.list 汇总
-  async v1(body) {
-    const payload = parseJson(body);
-    if (payload) {
-      if (payload.cmd === "sessions.list") return this.listSessions(body);
-      if (payload.cmd === "sessions.create" && !payload.session) {
-        payload.session = crypto.randomUUID();
-        body = JSON.stringify(payload);
-      }
-      if (payload.session) {
-        // 会话绑定在一个位置上,不改投;该位置暂不可用时让客户端稍后重试
-        try {
-          const resp = await this.forward(this.hostOf(this.slotFor(String(payload.session))), body);
-          if (!RETRY_STATUS.has(resp.status) || resp.status === 429) return resp;
-        } catch (err) {
-          // 连接失败,按不可用处理
-        }
-        return error(503, "session_unavailable", "该会话所在的 worker 暂时不可用，请稍后重试");
-      }
-    }
-    return this.any(body);
   }
 
   // 用根密钥校验:任一 worker 认可即有效(初始化时使用)
@@ -367,7 +316,7 @@ async function billedGetTaskResult(rt, payload, auth, root) {
   return new Response(text, { status: resp.status, headers: resp.headers });
 }
 
-// 同步接口(/solve、/v1):预扣,成功结算,失败退还
+// 同步接口(/solve):预扣,成功结算,失败退还
 async function billedSync(rt, body, auth, root, { cost, content, host, elapsedOf, succeeded }) {
   const denied = await reserve(rt.env, auth, cost);
   if (denied) return error(402, "insufficient_quota", denied);
@@ -414,34 +363,19 @@ async function relayBilled(rt, root, body) {
     return Response.json({ errorId: 0, errorCode: "", errorDescription: "", balance: user ? user.quota : 0 });
   }
 
-  if (request.method === "POST" && (path === "/solve" || path === "/v1")) {
+  if (request.method === "POST" && path === "/solve") {
     const auth = await authenticate(env, bearerKey(request), root);
-    if (auth && auth.root) return path === "/v1" ? rt.v1(body) : rt.any(body);
+    if (auth && auth.root) return rt.any(body);
     if (!auth) return error(401, "unauthorized", "缺少或错误的 API Key");
     const payload = parseJson(body);
     if (!payload) return error(400, "invalid_request", "请求体不是合法的 JSON");
-    const options = await getOptions(env);
-    if (path === "/solve") {
-      if (payload.proxy != null && payload.proxy !== "") return error(422, "invalid_request", "不支持 proxy，Turnstile 由服务端直接求解，请去掉该字段");
-      return billedSync(rt, body, auth, root, {
-        cost: intOption(options, "price_turnstile"),
-        content: "Turnstile(同步)",
-        host: hostname(payload.url),
-        elapsedOf: (d) => d.elapsed,
-        succeeded: (d) => Boolean(d.token),
-      });
-    }
-    if (options.v1_enabled !== "true") return error(403, "feature_disabled", "5 秒盾功能未开放");
-    // 用户令牌只能用 request.get / request.post(会话属于全局资源,仅根密钥可用)
-    if (!["request.get", "request.post"].includes(payload.cmd) || payload.session) {
-      return error(403, "forbidden", "令牌只支持不带会话的 request.get / request.post");
-    }
+    if (payload.proxy != null && payload.proxy !== "") return error(422, "invalid_request", "不支持 proxy，Turnstile 由服务端直接求解，请去掉该字段");
     return billedSync(rt, body, auth, root, {
-      cost: intOption(options, "price_v1"),
-      content: `FlareSolverr ${payload.cmd}`,
+      cost: intOption(await getOptions(env), "price_turnstile"),
+      content: "Turnstile(同步)",
       host: hostname(payload.url),
-      elapsedOf: (d) => (d.endTimestamp && d.startTimestamp ? (d.endTimestamp - d.startTimestamp) / 1000 : null),
-      succeeded: (d) => d.status === "ok",
+      elapsedOf: (d) => d.elapsed,
+      succeeded: (d) => Boolean(d.token),
     });
   }
 
@@ -457,7 +391,6 @@ function relayPlain(rt, body) {
     if (!payload) return taskError("ERROR_TASKID_INVALID", "请求体不是合法的 JSON");
     return rt.getTaskResult(body, payload.taskId);
   }
-  if (request.method === "POST" && url.pathname === "/v1" && body) return rt.v1(body);
   return rt.any(body);
 }
 
@@ -467,7 +400,7 @@ export default {
     const rt = new Relay(request, env, ctx, url);
     await rt.init();
 
-    // 控制台在站点根路径;不要求 HTML 的 GET /(API 客户端、FlareSolverr 的就绪检查)照常转发给 worker
+    // 控制台在站点根路径;不要求 HTML 的 GET /(API 客户端的就绪检查)照常转发给 worker,返回 {"msg": "Turnstile Solver is ready!"}
     const isGet = request.method === "GET" || request.method === "HEAD";
     if (url.pathname === "/" && isGet && (request.headers.get("accept") || "").includes("text/html")) {
       return new Response(request.method === "HEAD" ? null : ADMIN_HTML, { headers: ADMIN_PAGE_HEADERS });
@@ -477,6 +410,8 @@ export default {
       if (!isGet) return new Response(null, { status: 405 });
       return new Response(null, { status: 302, headers: { location: "/", "cache-control": "no-store" } });
     }
+    // 5 秒盾已下线:不再转发,还没升级的 worker 也就不会再处理
+    if (url.pathname === "/v1") return error(404, "not_found", "5 秒盾(/v1)已下线");
     // 轮换器读取各 worker 的负载(根密钥)
     if (url.pathname === "/api/fleet" && request.method === "GET") {
       const root = await rootKey(env);

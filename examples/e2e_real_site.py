@@ -5,9 +5,7 @@
 环境变量:
     SOLVER_URL   网关地址(流水线内默认取 FLEET_PUBLIC_URL)
     TS_API_KEY   网关的 API Key
-    E2E_MODE     task(默认,createTask + 每 3 秒 getTaskResult)、solve(POST /solve 同步)
-                 或 v1(FlareSolverr request.get + tabs_till_verify)
-    E2E_TABS     v1 模式下的 tabs_till_verify,默认 1
+    E2E_MODE     task(默认,createTask + 每 3 秒 getTaskResult)或 solve(POST /solve 同步)
     SITE_URL     测试站点,默认 https://turnstile-test.000.moe(提供 /config 与 /verify,见 testsite/)
     E2E_ROUNDS   每轮并发数,逗号分隔,默认 1,8,24
     E2E_REPEAT   每个并发档位跑几批,默认 1
@@ -48,7 +46,7 @@ def request(method: str, url: str, body: dict | None = None, headers: dict | Non
         return type(e).__name__, {}
 
 
-def one_run(solver: str, key: str, site: str, cfg: dict, mode: str, tabs: int) -> dict:
+def one_run(solver: str, key: str, site: str, cfg: dict, mode: str) -> dict:
     t0 = time.monotonic()
     if mode == "task":
         task = {"type": "TurnstileTaskProxyless", "websiteURL": f"{site}/", "websiteKey": cfg["sitekey"],
@@ -65,14 +63,6 @@ def one_run(solver: str, key: str, site: str, cfg: dict, mode: str, tabs: int) -
         token = (solved.get("solution") or {}).get("token") if solved.get("status") == "ready" else None
         if not token:
             solved = {"code": solved.get("errorCode") or solved.get("status"), "message": solved.get("errorDescription")}
-    elif mode == "v1":
-        code, solved = request(
-            "POST",
-            f"{solver}/v1",
-            {"cmd": "request.get", "url": f"{site}/", "maxTimeout": 80000, "tabs_till_verify": tabs},
-            {"X-API-Key": key},
-        )
-        token = ((solved.get("solution") or {}).get("turnstile_token")) if code == 200 else None
     else:
         code, solved = request(
             "POST",
@@ -128,7 +118,6 @@ def main() -> int:
     key = os.getenv("TS_API_KEY", "")
     site = os.getenv("SITE_URL", "https://turnstile-test.000.moe").rstrip("/")
     rounds = [int(x) for x in os.getenv("E2E_ROUNDS", "1,8,24").split(",")]
-    tabs = int(os.getenv("E2E_TABS", "1"))
     mode = os.getenv("E2E_MODE", "task")
     repeat = int(os.getenv("E2E_REPEAT", "1"))
     if not solver or not key:
@@ -154,7 +143,7 @@ def main() -> int:
             sampler.start()
             t0 = time.monotonic()
             with ThreadPoolExecutor(n) as pool:
-                results = list(pool.map(lambda _: one_run(solver, key, site, cfg, mode, tabs), range(n)))
+                results = list(pool.map(lambda _: one_run(solver, key, site, cfg, mode), range(n)))
             wall = time.monotonic() - t0
             stop.set()
             sampler.join()

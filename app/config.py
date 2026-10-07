@@ -22,23 +22,18 @@ def _env_float(name: str, default: float) -> float:
 class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
-    # 设置后 /v1 要求 X-API-Key 或 Authorization: Bearer;FlareSolverr 本身没有鉴权,对外暴露时必须设置
+    # 设置后 /solve 要求 X-API-Key 或 Authorization: Bearer,任务接口要求 clientKey;对外暴露时必须设置
     api_key: str = ""
 
-    # FlareSolverr 地址
+    # FlareSolverr 地址(只用于健康检查)
     backend_url: str = "http://127.0.0.1:8191"
 
-    # 同时转发给 FlareSolverr 的耗时请求数(request.get / request.post / sessions.create,每个都会启动浏览器)
+    # 同时运行的求解浏览器数(/solve 与异步任务共用)
     max_concurrency: int = 4
     # 槽位全满时最多允许多少个请求排队,超出直接返回 429;0 表示不限
     max_queue: int = 0
-    # maxTimeout 上限(秒)。部署在 Cloudflare 后面时应小于其 100 秒的源站超时
+    # 求解总超时上限(秒):异步任务用它,/solve 的 timeout 不超过它。部署在 Cloudflare 后面时应小于其 100 秒的源站超时
     max_timeout: float = 85.0
-
-    # 同时存在的会话上限(每个会话常驻一个浏览器);0 表示不限
-    max_sessions: int = 4
-    # 会话闲置超过这个时间(秒)由网关自动销毁;0 表示不清理
-    session_idle_ttl: float = 1800.0
 
     # /solve:单次求解的默认总超时、每次尝试的超时(超出即换新浏览器重试)
     default_timeout: float = 60.0
@@ -84,8 +79,6 @@ class Settings:
             max_concurrency=_env_int("TS_MAX_CONCURRENCY", d.max_concurrency),
             max_queue=_env_int("TS_MAX_QUEUE", d.max_queue),
             max_timeout=_env_float("TS_MAX_TIMEOUT", d.max_timeout),
-            max_sessions=_env_int("TS_MAX_SESSIONS", d.max_sessions),
-            session_idle_ttl=_env_float("TS_SESSION_IDLE_TTL", d.session_idle_ttl),
             default_timeout=_env_float("TS_DEFAULT_TIMEOUT", d.default_timeout),
             attempt_timeout=_env_float("TS_ATTEMPT_TIMEOUT", d.attempt_timeout),
             solve_page=_env_str("TS_SOLVE_PAGE", d.solve_page),

@@ -23,7 +23,7 @@
     FLEET_MIN: "2"
     FLEET_MAX: "4"
     # 上线新版本时把这个数字加一并推送,轮换器会按错开规则逐个替换旧版本 worker
-    FLEET_VERSION: "12"
+    FLEET_VERSION: "13"
     # 账号最多同时运行 6 个 CPU 开发环境(含其他仓库与自检环境),超出会被平台拒绝
     FLEET_MAX_WORKSPACES: "6"
   stages:
@@ -43,9 +43,7 @@
   TS_STALL_SECONDS: "20"
   # 低于 Cloudflare 100 秒的源站超时
   TS_MAX_TIMEOUT: "85"
-  TS_MAX_SESSIONS: "4"
-  TS_SESSION_IDLE_TTL: "1800"
-  # FlareSolverr 的 waitress 线程数,需大于并发数,留给 /health、sessions.list 等轻量请求
+  # FlareSolverr 的 waitress 线程数(网关只向它发 /health)
   WAITRESS_THREADS: "14"
 
 .worker: &worker

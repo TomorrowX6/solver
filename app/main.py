@@ -1,10 +1,9 @@
-"""Turnstile / FlareSolverr 网关。
+"""Turnstile 网关。
 
     POST /createTask、/getTaskResult、/getBalance   YesCaptcha / CapSolver 风格的任务接口(clientKey = API Key)
     POST /solve   传入 url + sitekey,同步返回 Turnstile token(复用 FlareSolverr 的反检测浏览器)
-    POST /v1      FlareSolverr 接口,请求与响应格式不变
 
-两者共用一套浏览器并发名额,并提供鉴权、排队上限、超时上限和闲置会话清理。
+两者共用一套浏览器并发名额,并提供鉴权、排队上限和超时上限。
 网关自身的错误统一为 {"status": "error", "message": ..., "code": ...}。
 """
 
@@ -34,19 +33,13 @@ log = logging.getLogger("gateway.api")
 # 源站返回的这两个状态码会被替换成 Cloudflare 自己的错误页,JSON 错误信息会丢失
 _ERROR_STATUS = {
     "unauthorized": 401,
-    "invalid_request": 400,
     "turnstile_error": 422,
     "busy": 429,
-    "session_limit": 429,
-    # FlareSolverr / 求解器不可用,请求尚未执行:上游可以改投其他副本
-    "backend_unavailable": 503,
+    # 求解器不可用,请求尚未执行:上游可以改投其他副本
     "solver_unavailable": 503,
     # 已实际执行但没拿到 token:按最终结果返回,避免上游重复执行耗时请求
     "timeout": 500,
     "page_error": 500,
-    # 已交给 FlareSolverr 处理但超时或返回异常:按最终结果返回,避免重复执行耗时请求
-    "backend_timeout": 500,
-    "backend_error": 500,
 }
 
 
@@ -95,7 +88,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         slots = Slots(settings.max_concurrency, settings.max_queue)
-        backend = FlareSolverr(settings, transport=transport, slots=slots)
+        backend = FlareSolverr(settings, transport=transport)
         solver = TurnstileSolver(
             slots,
             settings.max_concurrency,
@@ -116,7 +109,6 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
             timeout=settings.max_timeout,
             attempt_timeout=settings.attempt_timeout,
         )
-        await backend.start()
         await solver.start()
         tasks.start()
         app.state.backend = backend
@@ -134,7 +126,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         version="3.0.0",
         description=(
             "POST /createTask + /getTaskResult:YesCaptcha / CapSolver 风格的 Turnstile 任务接口;"
-            "POST /solve:传入 url + sitekey 同步返回 token;POST /v1:FlareSolverr 兼容接口。"
+            "POST /solve:传入 url + sitekey 同步返回 token。"
         ),
         lifespan=lifespan,
     )
@@ -156,7 +148,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
 
     @app.get("/", tags=["meta"])
     async def index(request: Request) -> dict:
-        return {"msg": "FlareSolverr gateway is ready!", "version": backend_of(request).version}
+        return {"msg": "Turnstile Solver is ready!", "version": backend_of(request).version}
 
     @app.get("/health", response_model=Health, tags=["meta"])
     async def health(request: Request) -> Health:
@@ -171,15 +163,12 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
             backend_version=backend.version,
             solver="ok" if solver.available else "unavailable",
             solver_error=None if solver.available else getattr(solver, "unavailable_reason", None),
-            active=backend.slots.active,
+            active=solver.slots.active,
             capacity=settings.max_concurrency,
-            queued=backend.slots.waiting,
-            completed=backend.completed,
-            failed=backend.failed,
+            queued=solver.slots.waiting,
             solved=solver.solved,
             solve_failed=solver.failed,
-            rejected=backend.slots.rejected,
-            sessions=len(backend.sessions),
+            rejected=solver.slots.rejected,
             tasks_pending=request.app.state.tasks.pending,
             draining=draining(),
             attempt_errors=dict(getattr(solver, "attempt_errors", {})),
@@ -281,24 +270,5 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         return SolveResponse(
             token=result.token, elapsed=result.elapsed, attempts=result.attempts, user_agent=result.user_agent
         )
-
-    @app.post("/v1", tags=["flaresolverr"], summary="FlareSolverr v1 接口(请求与响应格式同 FlareSolverr)")
-    async def v1(request: Request) -> JSONResponse:
-        if not authorized(request):
-            return _error("unauthorized", "缺少或错误的 API Key")
-        try:
-            payload = await request.json()
-        except ValueError:
-            return _error("invalid_request", "请求体不是合法的 JSON")
-        if not isinstance(payload, dict):
-            return _error("invalid_request", "请求体必须是 JSON 对象")
-        if draining() and payload.get("cmd") in ("request.get", "request.post", "sessions.create"):
-            return _error("busy", "该 worker 正在下线，请重试")
-        try:
-            status, body = await backend_of(request).call(payload)
-        except BackendError as e:
-            log.warning("v1 %s rejected [%s]: %s", payload.get("cmd"), e.code, e.message)
-            return _error(e.code, e.message)
-        return JSONResponse(status_code=status, content=body)
 
     return app

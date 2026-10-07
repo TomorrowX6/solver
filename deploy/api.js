@@ -92,10 +92,8 @@ async function status(c) {
     password_register: options.register_password_enabled === "true" && !oauthOnly(options),
     oauth_only: oauthOnly(options),
     price_turnstile: intOption(options, "price_turnstile"),
-    price_v1: intOption(options, "price_v1"),
     github_oauth: OAUTH.github.enabled(options),
     linuxdo_oauth: OAUTH.linuxdo.enabled(options),
-    v1_enabled: options.v1_enabled === "true",
   });
 }
 
@@ -790,8 +788,6 @@ async function channelConfig(c) {
     "TS_STALL_SECONDS=20",
     "TS_TASK_TTL=300",
     "TS_MAX_PENDING_TASKS=60",
-    "TS_MAX_SESSIONS=4",
-    "TS_SESSION_IDLE_TTL=1800",
   ];
   if (ch.concurrency > 0) lines.push(`TS_MAX_CONCURRENCY=${ch.concurrency}`);
   return text(lines.join("\n") + "\n");

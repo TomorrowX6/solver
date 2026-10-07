@@ -3,7 +3,7 @@
 ## 架构
 
 ```
-客户端 ──HTTPS──► solver.000.moe ── Cloudflare Worker(cf-worker.js:随机分流 + 失败改投;taskId / 会话固定到一个位置)
+客户端 ──HTTPS──► solver.000.moe ── Cloudflare Worker(cf-worker.js:随机分流 + 失败改投;taskId 固定到一个位置)
                                       │              │              │              │
                                    隧道 A          隧道 B          隧道 C          隧道 D
                                  (本域名源站)   solver-b.000.moe solver-c.000.moe solver-d.000.moe
@@ -22,16 +22,13 @@ CNB 定时任务(每 10 分钟)── fleet/rotator.py ── CNB OpenAPI:列出
   替补继承被替换 worker 的位置。某个位置多出来的就绪 worker 会被关掉(先关最早到期的),
   所以手动上线新版本时只需新建 worker,旧的由轮换器回收。
 - **分流**:Cloudflare 不会在同一条隧道的多个连接器之间做负载均衡,所以每个位置各用一条隧道,
-  由 Worker 随机打乱顺序依次尝试;某一条返回 429(槽位与排队都已满)、503(FlareSolverr 不可用)、
+  由 Worker 随机打乱顺序依次尝试;某一条返回 429(槽位与排队都已满)、503(求解器不可用)、
   无可用连接器(530)或源站连接失败时,改投下一条。每个 worker 并发 4、最多排队 8(`TS_MAX_QUEUE`),
-  `maxTimeout` 上限 85 秒(`TS_MAX_TIMEOUT`),不超过 Cloudflare 100 秒的源站超时。
+  单次求解总超时上限 85 秒(`TS_MAX_TIMEOUT`),不超过 Cloudflare 100 秒的源站超时。
 - **任务**:`createTask` 随机分到某台 worker,返回 `ERROR_NO_SLOT_AVAILABLE` 时 Worker 自动改投下一台;
   taskId 是 UUID 格式,第一位是位置编号(a=0、b=1……),后 7 位是 worker 标识,`getTaskResult` 按第一位路由回原 worker。
   worker 轮换后,它名下尚未取走的结果随之丢失,查询返回 `ERROR_TASKID_INVALID`,重新创建即可(每个位置同一时间只有一台在交接)。
-- **会话**:FlareSolverr 的会话只存在于创建它的那台 worker 上,而且请求里带了不存在的会话名时它会直接新建。
-  所以 Worker 按会话名哈希把带 `session` 的请求固定到一个位置,不改投;`sessions.create` 未指定名字时由 Worker 生成;
-  `sessions.list` 汇总所有位置。每台最多 4 个会话(`TS_MAX_SESSIONS`),闲置 30 分钟自动销毁。
-  轮换期间,同一位置的新旧 worker 同时连在该位置的隧道上,旧的摘除连接时流量自动切到新的
+- **交接**:轮换期间,同一位置的新旧 worker 同时连在该位置的隧道上,旧的摘除连接时流量自动切到新的
   (实测关闭旧 worker 期间约 200 个请求无一失败)。
 
 ### 生命周期(北京时间)
@@ -152,44 +149,13 @@ curl -X POST https://solver.000.moe/getTaskResult -H "Content-Type: application/
 
 字段与错误码见主 [README](../README.md#接口)。同步求解:`POST /solve`,`{"url": …, "sitekey": …}` → `{"token": …}`。
 
-### FlareSolverr 接口
-
-请求与响应格式同 [FlareSolverr /v1](https://github.com/FlareSolverr/FlareSolverr#usage),只需加上 API Key:
-
-```bash
-curl -X POST https://solver.000.moe/v1 \
-  -H "X-API-Key: $TS_API_KEY" -H "Content-Type: application/json" \
-  -d '{"cmd": "request.get", "url": "https://目标站点/", "maxTimeout": 60000}'
-# → solution.cookies(含 cf_clearance)、solution.userAgent、solution.response(HTML)
-
-# 页面里有 Turnstile 组件:按 1 次 Tab 聚焦到组件并点击,token 在 solution.turnstile_token
-curl -X POST https://solver.000.moe/v1 \
-  -H "X-API-Key: $TS_API_KEY" -H "Content-Type: application/json" \
-  -d '{"cmd": "request.get", "url": "https://目标站点/", "maxTimeout": 60000, "tabs_till_verify": 1}'
-```
-
 `GET /health` 的 `worker` 字段形如 `cnb-xxx/b`,表示请求落在哪个 worker、哪个位置上;
-`backend` 为 FlareSolverr 是否健康,`active` / `queued` / `rejected` / `sessions` 为并发、排队、被拒与会话数;
+`backend` 为 FlareSolverr 进程是否健康,`active` / `queued` / `rejected` 为并发、排队与被拒数;
 `cpu_seconds`、`cpu_limit`、`mem_used_mb` 来自容器 cgroup。
-
-### 会话
-
-```bash
-# 创建(不指定名字时由 Worker 生成 UUID);之后的请求带上同一个 session,会落在同一台 worker、复用同一个浏览器
-curl … -d '{"cmd": "sessions.create"}'                      # → {"session": "977ce215-…"}
-curl … -d '{"cmd": "request.get", "url": "…", "session": "977ce215-…"}'
-curl … -d '{"cmd": "sessions.destroy", "session": "977ce215-…"}'
-```
-
-实测:同一会话第一次请求约 3.7 秒,之后约 0.6 秒,并保持 `cf_clearance`。
-所在位置轮换后,FlareSolverr 会用同一个名字自动新建会话,之前的 cookie 不再保留,第一次请求会重新过验证;
-所在位置暂时不可用时返回 503 `session_unavailable`,稍后重试即可。
 
 ### 注意
 
-- 两边都满载时客户端会收到 429(带 `Retry-After: 2`),稍后重试即可;会话数满时为 429 `session_limit`。
-- 拿到的 `cf_clearance` 与 User-Agent、出口 IP 绑定:用自己的 HTTP 客户端访问时要带上返回的 `userAgent`,
-  而出口 IP 是 CNB 构建机的,与调用方不同,cookie 在调用方那里未必可用。
+- 所有 worker 都满载时 `/solve` 返回 429(带 `Retry-After: 2`),任务接口返回 `ERROR_NO_SLOT_AVAILABLE`,稍后重试即可。
 - Cloudflare 的浏览器完整性检查会拦截 Python 标准库 `urllib` 的默认 User-Agent(返回 403,error 1010)。
   用 urllib 调用时请自定义 `User-Agent`;requests、httpx、curl、Go、Node 的默认 UA 不受影响。
 

@@ -7,7 +7,7 @@
 在目标域名下打开一个页面(先试 `/robots.txt`,不行再用传入的网址),换成用指定 sitekey 渲染的组件,点击复选框后取回 token。
 页面属于目标域名,所以能通过 Turnstile 的域名校验;实测拿到的 token 能通过站点后端的 siteverify。
 
-另外保留两个接口:`POST /solve` 同步求解,`POST /v1` 为 FlareSolverr 原生接口(过 Cloudflare 验证页、拿 `cf_clearance`)。
+另外提供 `POST /solve` 同步求解。
 
 ## 启动
 
@@ -87,15 +87,6 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 出错时为 `{"status": "error", "code": "…", "message": "…"}`:401 `unauthorized`、422 `turnstile_error`(sitekey 与域名不匹配等)、
 429 `busy`、500 `timeout` / `page_error`、503 `solver_unavailable`。参数校验失败(包括传入不再支持的 `proxy`)时为 422。
 
-### FlareSolverr 接口 `POST /v1`
-
-请求与响应格式同 [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr#usage),需带 `X-API-Key`。
-适合需要通过 Cloudflare 验证页(5 秒盾)、拿页面内容或 `cf_clearance` cookie 的场景。
-
-- 实测 5 秒盾站点单个请求约 15 秒通过;同一站点同时发很多请求会明显变慢(8 个同时约 75 秒),建议拿到 cookie 后复用。
-- `cf_clearance` 与 User-Agent、出口 IP 绑定:要在自己的程序里复用,请求时带 `proxy`(例如 `{"url": "http://user:pass@host:port"}`),
-  让求解经你的代理出口,之后用同一代理、响应里的 `userAgent` 和 cookies 访问。
-
 ### 控制台与积分
 
 `https://solver.000.moe`(由 Cloudflare Worker 提供,数据存于 D1,参照 NewAPI):用户、令牌(`sk-…`)、积分、兑换码、使用日志、渠道状态、系统设置。
@@ -103,8 +94,7 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 - 首次打开时初始化超级管理员,需填写现有的 API Key(校验后作为转发 worker 的根密钥保存)。
 - 调用方文档在控制台「使用文档」页,未登录也可访问:`https://solver.000.moe/#docs`。
 - 用户令牌即 `clientKey` / `X-API-Key`:创建任务时预扣积分,求解成功才结算,失败或 10 分钟未取结果自动退还;`getBalance` 返回账户余额。
-- 现有的 API Key 照常可用且不计费;用户令牌只能用 `/v1` 的 `request.get` / `request.post`(不能用会话)。
-- 「系统设置」可关闭 5 秒盾(`/v1`):关闭后用户令牌调用 `/v1` 返回 403,使用文档中也不再展示,现有 API Key 不受影响。
+- 现有的 API Key 照常可用且不计费。
 - 充值方式为管理员生成的兑换码;价格、注册开关(密码、GitHub、LINUX DO 分别开关,例如只开放 LINUX DO 注册)、新用户赠送在「系统设置」中修改。
 - 支持 GitHub 与 LINUX DO 登录:在「系统设置」填写对应应用的 Client ID / Secret;开放该方式注册时首次登录自动创建账号,
   已有账号可在「个人设置」中绑定。可开启「仅第三方登录」:登录页只显示 GitHub / LINUX DO 按钮,密码登录与密码注册关闭
@@ -136,7 +126,7 @@ FlareSolverr v3.5.2(打与镜像相同的补丁)和 cloudflared,装到 `/opt/tur
 
 ### `GET /health`
 
-`status`、`backend`(FlareSolverr)、`solver`(sitekey 求解器,不可用时 `solver_error` 给出原因,初始化失败会在后台每 15 秒重试)、`active` / `queued` / `rejected`、`tasks_pending`、`sessions`,
+`status`、`backend`(FlareSolverr)、`solver`(sitekey 求解器,不可用时 `solver_error` 给出原因,初始化失败会在后台每 15 秒重试)、`active` / `queued` / `rejected`、`tasks_pending`,
 `attempt_errors`(每次尝试失败的原因计数,含随后重试成功的)、`token_stats`,以及容器 cgroup 的 `cpu_seconds`、`cpu_limit`、`mem_used_mb`。
 
 ## 求解策略
@@ -157,7 +147,7 @@ FlareSolverr v3.5.2(打与镜像相同的补丁)和 cloudflared,装到 `/opt/tur
 - 每次尝试失败的原因按类别计入 `/health` 的 `attempt_errors`(api.js 未加载、组件卡住、点击后无响应、页面导航超时等);
   `token_stats` 按拿到 token 时的点击次数与来源计数。
 - 不要关闭浏览器的 QUIC(HTTP/3):同一节点上的对比实验中,关闭 QUIC 后组件几乎全部卡住(0/4 × 6 批),开启时 4/4 × 6 批。
-- `/solve`、任务、`/v1` 的耗时命令共用浏览器名额(`TS_MAX_CONCURRENCY` + 排队 `TS_MAX_QUEUE`),超出返回忙。
+- `/solve` 与任务共用浏览器名额(`TS_MAX_CONCURRENCY` + 排队 `TS_MAX_QUEUE`),超出返回忙。
 
 ## 配置(环境变量)
 
@@ -165,9 +155,9 @@ FlareSolverr v3.5.2(打与镜像相同的补丁)和 cloudflared,装到 `/opt/tur
 |---|---|---|
 | `TS_HOST` / `TS_PORT` | `127.0.0.1` / `8000` | 监听地址 |
 | `TS_API_KEY` | 空 | API Key(`clientKey` / `X-API-Key`);对外暴露时必须设置 |
-| `TS_MAX_CONCURRENCY` | `4` | 同时运行的浏览器数(求解、FlareSolverr 请求、会话创建) |
+| `TS_MAX_CONCURRENCY` | `4` | 同时运行的求解浏览器数 |
 | `TS_MAX_QUEUE` | `0` | 名额全满时允许排队的请求数,超出即返回忙;`0` 表示不限 |
-| `TS_MAX_TIMEOUT` | `85` | 单次求解 / `maxTimeout` 上限(秒) |
+| `TS_MAX_TIMEOUT` | `85` | 单次求解的总超时上限(秒) |
 | `TS_DEFAULT_TIMEOUT` | `60` | `/solve` 未指定 `timeout` 时的总超时(秒) |
 | `TS_ATTEMPT_TIMEOUT` | `35` | 单次尝试的超时(秒),超出换新浏览器重试 |
 | `TS_SOLVE_PAGE` | `auto` | 承载组件的页面:`auto`(先 `/robots.txt` 再原网址)、`light`、`full` |
@@ -180,9 +170,8 @@ FlareSolverr v3.5.2(打与镜像相同的补丁)和 cloudflared,装到 `/opt/tur
 | `TS_DRAIN_FILE` | 空 | 下线标记文件:存在时不接受新任务(返回繁忙,上游改投),只返回已有任务的结果 |
 | `TS_TASK_PREFIX` | 空 | taskId 第一段的前缀(多副本部署时用于路由) |
 | `TS_TASK_TTL` / `TS_MAX_PENDING_TASKS` | `300` / `200` | 任务结果保留秒数 / 最多未完成任务数 |
-| `TS_BACKEND_URL` | `http://127.0.0.1:8191` | FlareSolverr 地址(`/v1` 使用) |
+| `TS_BACKEND_URL` | `http://127.0.0.1:8191` | FlareSolverr 地址(只用于 `/health` 的健康检查) |
 | `TS_FLARESOLVERR_DIR` | `/app` | FlareSolverr 源码目录(求解器从这里导入浏览器工具) |
-| `TS_MAX_SESSIONS` / `TS_SESSION_IDLE_TTL` | `4` / `1800` | `/v1` 会话上限 / 闲置多少秒后销毁 |
 | `TS_WORKER_ID` | 空 | 在 `/health` 中返回,用于区分副本 |
 
 ## 测试
@@ -192,9 +181,9 @@ python -m pytest                                          # 离线测试(模拟�
 SOLVER_URL=… TS_API_KEY=… python examples/e2e_real_site.py   # 真实 Turnstile 站点端到端,token 交给 siteverify 校验(见 testsite/)
 ```
 
-`E2E_MODE` 可选 `task`(默认,createTask + getTaskResult)、`solve`、`v1`。
+`E2E_MODE` 可选 `task`(默认,createTask + getTaskResult)或 `solve`。
 
 ## 说明
 
-- 并发、任务与会话状态都在进程内,网关只能**单进程**运行(不要使用 uvicorn `--workers`)。
+- 并发与任务状态都在进程内,网关只能**单进程**运行(不要使用 uvicorn `--workers`)。
 - 仅限在你拥有或获得授权的站点上使用,并遵守目标站点的服务条款。

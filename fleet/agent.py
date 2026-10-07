@@ -42,9 +42,8 @@ PERMANENT = os.getenv("AGENT_PERMANENT", "") in {"1", "true", "yes"}
 # FlareSolverr 源码目录与端口(上游镜像中位于 /app)
 FLARESOLVERR_DIR = Path(os.getenv("FLARESOLVERR_DIR", "/app"))
 FLARESOLVERR_PORT = int(os.getenv("FLARESOLVERR_PORT", "8191"))
-# 自检:经网关让 FlareSolverr 真实打开一个页面,确认浏览器与出口网络都正常。默认用 Cloudflare 的页面(国内可达)
-SELF_TEST_URL = os.getenv("AGENT_SELFTEST_URL", "https://challenges.cloudflare.com/cdn-cgi/trace")
-# /solve 自检:Cloudflare 官方测试 sitekey(任何域名都会通过),承载页面需要能注入脚本(没有严格 CSP)
+# 自检:经网关用 Cloudflare 官方测试 sitekey(任何域名都会通过)真实求解一次,确认浏览器与出口网络都正常;
+# 承载页面需要能注入脚本(没有严格 CSP)
 SOLVE_TEST_URL = os.getenv("AGENT_SOLVE_TEST_URL", "https://example.com/")
 SOLVE_TEST_SITEKEY = "1x00000000000000000000AA"
 SLOT_ORDER = "abcdefghijklmnop"
@@ -304,19 +303,13 @@ class Agent:
             return json.loads(resp.read())
 
     def self_test(self) -> bool:
-        """/v1 经 FlareSolverr 打开页面 + /solve 用测试 sitekey 拿到 token,两项都通过才算就绪。"""
+        """/solve 用测试 sitekey 拿到 token 才算就绪。"""
         try:
-            result = self._post("/v1", {"cmd": "request.get", "url": SELF_TEST_URL, "maxTimeout": 30000})
-            solution = result.get("solution") or {}
-            if not (result.get("status") == "ok" and solution.get("status") == 200):
-                log(f"self-test /v1 failed: status={result.get('status')} message={result.get('message')!r}")
-                return False
             solved = self._post("/solve", {"url": SOLVE_TEST_URL, "sitekey": SOLVE_TEST_SITEKEY, "timeout": 45})
             if not solved.get("token"):
                 log(f"self-test /solve failed: {solved}")
                 return False
-            log(f"self-test passed: /v1 page={solution.get('status')}, /solve token={solved['token'][:20]} "
-                f"in {solved.get('elapsed')}s")
+            log(f"self-test passed: /solve token={solved['token'][:20]} in {solved.get('elapsed')}s")
             return True
         except Exception as e:  # noqa: BLE001
             log(f"self-test failed: {e}")

@@ -942,12 +942,10 @@
 
   // ---------------------------------------------------------------- 使用文档
   async function pageDocs(root) {
-    // 每次打开都重新读取功能开关和价格,避免在其他标签页修改设置后仍显示旧内容
+    // 每次打开都重新读取价格,避免在其他标签页修改设置后仍显示旧内容
     try { sys = { ...(sys || {}), ...(await api("GET", "/api/status")) }; } catch {}
     const origin = location.origin;
     const price = sys ? sys.price_turnstile : 1;
-    const priceV1 = sys ? sys.price_v1 : 1;
-    const v1 = !sys || sys.v1_enabled !== false;
     const KEY = "sk-你的令牌";
     const json = (v) => JSON.stringify(v, null, 2);
     const mono = (t) => h("span", { class: "mono" }, t);
@@ -1034,32 +1032,6 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
 # {"token": "…", "elapsed": 18.2, "attempts": 1, "user_agent": "…"}`,
     };
 
-    const challengeExample = `import requests
-
-API = "${origin}"
-KEY = "${KEY}"
-# 可选：让求解经你的代理出口，之后用同一代理复用 cookie
-PROXY_HOST, PROXY_USER, PROXY_PASS = "http://host:port", "user", "pass"
-
-r = requests.post(f"{API}/v1", headers={"X-API-Key": KEY}, json={
-    "cmd": "request.get",
-    "url": "https://目标站点/",
-    "maxTimeout": 60000,
-    "proxy": {"url": PROXY_HOST, "username": PROXY_USER, "password": PROXY_PASS},
-}, timeout=90).json()
-if r["status"] != "ok":
-    raise RuntimeError(r["message"])
-
-solution = r["solution"]
-html = solution["response"]  # 通过验证后的页面
-cookies = {c["name"]: c["value"] for c in solution["cookies"]}  # 含 cf_clearance
-ua = solution["userAgent"]
-
-# 复用 cf_clearance：必须同一出口 IP 和同一 User-Agent
-proxy = PROXY_HOST.replace("://", f"://{PROXY_USER}:{PROXY_PASS}@")
-page = requests.get("https://目标站点/other", cookies=cookies, headers={"User-Agent": ua},
-                    proxies={"http": proxy, "https": proxy}, timeout=30)`;
-
     const toc = h("div", { class: "card card-bd" });
 
     root.append(...[
@@ -1069,13 +1041,12 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
         h("dl", { class: "kv" },
           h("dt", {}, "地址"), h("dd", {}, mono(origin)),
           h("dt", {}, "令牌"), h("dd", {}, "在「令牌」页创建，形如 sk-…"),
-          h("dt", {}, "鉴权"), h("dd", {}, `任务接口在请求体里传 clientKey；${v1 ? "/solve、/v1" : "/solve"} 用请求头 X-API-Key(或 Authorization: Bearer)`)),
+          h("dt", {}, "鉴权"), h("dd", {}, "任务接口在请求体里传 clientKey；/solve 用请求头 X-API-Key(或 Authorization: Bearer)")),
         para("计费"),
         simpleTable(["接口", "价格", "说明"], [
           ["Turnstile(createTask、/solve)", `${price} 积分 / 次`, "求解成功才扣；失败、超时或 10 分钟未取结果自动退还"],
-          v1 ? ["5 秒盾(/v1)", `${priceV1} 积分 / 次`, "成功才扣，失败退还"] : null,
           ["getBalance、getTaskResult", "免费", "—"],
-        ].filter(Boolean)),
+        ]),
         para("所有接口均为 POST + JSON。繁忙时返回 ERROR_NO_SLOT_AVAILABLE(任务接口)或 HTTP 429，稍后重试即可；负载高时会自动扩容。")),
 
       section("create", "Turnstile：创建任务",
@@ -1124,42 +1095,7 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
         code(json({ token: "0.xxxxx…", elapsed: 18.2, attempts: 1, user_agent: "Mozilla/5.0 …" })),
         para("出错时返回 {\"status\": \"error\", \"code\": \"…\", \"message\": \"…\"},HTTP 状态码见「错误码」。")),
 
-      v1 && section("challenge", "5 秒盾：/v1",
-        endpoint("POST", "/v1"),
-        para("用真实浏览器打开页面，自动通过 Cloudflare 验证页(5 秒盾)，返回页面内容、cookies(含 cf_clearance)和 User-Agent。请求与响应格式同 FlareSolverr v3。"),
-        code(json({ cmd: "request.get", url: "https://目标站点/", maxTimeout: 60000 })),
-        simpleTable(["字段", "必填", "说明"], [
-          [mono("cmd"), "是", "request.get 或 request.post"],
-          [mono("url"), "是", "要打开的网址"],
-          [mono("maxTimeout"), "否", "最长等待(毫秒)，默认 60000，最大 85000"],
-          [mono("postData"), "request.post 必填", "表单字符串(application/x-www-form-urlencoded)，例如 a=1&b=2"],
-          [mono("cookies"), "否", '打开前写入的 cookie，例如 [{"name": "a", "value": "1"}]'],
-          [mono("proxy"), "否", '{"url": "http://host:port", "username": "user", "password": "pass"}'],
-          [mono("returnOnlyCookies"), "否", "true 时不返回页面内容，只返回 cookies"],
-          [mono("returnScreenshot"), "否", "true 时返回页面截图(Base64 PNG)"],
-          [mono("waitInSeconds"), "否", "通过验证后再等待的秒数，用于加载动态内容"],
-          [mono("disableMedia"), "否", "true 时不加载图片、CSS、字体，速度更快"],
-        ]),
-        para("响应"),
-        code(json({
-          status: "ok", message: "Challenge solved!", startTimestamp: 1760000000000, endTimestamp: 1760000014000,
-          solution: {
-            url: "https://目标站点/", status: 200, response: "<html>…</html>",
-            cookies: [{ name: "cf_clearance", value: "…", domain: ".目标站点", path: "/", expires: 1760003600, httpOnly: true, secure: true }],
-            userAgent: "Mozilla/5.0 …",
-          },
-        })),
-        simpleTable(["说明", "内容"], [
-          ["耗时", "通常 3–15 秒；同一站点同时发很多请求会明显变慢，建议拿到 cookie 后复用"],
-          ["复用 cookie", "cf_clearance 与出口 IP、User-Agent 绑定：请求时带 proxy，之后用同一代理、响应里的 userAgent 和 cookies 访问"],
-          ["失败", "返回 {\"status\": \"error\", \"message\": \"…\"}(HTTP 500)，不扣积分"],
-          ["限制", "令牌只支持不带 session 的 request.get / request.post"],
-        ])),
-
-      section("examples", "示例",
-        tabs(turnstileExamples),
-        v1 ? para("5 秒盾(Python)") : null,
-        v1 ? code(challengeExample) : null),
+      section("examples", "示例", tabs(turnstileExamples)),
 
       section("errors", "错误码",
         para("任务接口(createTask、getTaskResult、getBalance)始终返回 HTTP 200，用 errorId / errorCode 表示结果："),
@@ -1173,17 +1109,16 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
           ["ERROR_CAPTCHA_UNSOLVABLE", "求解失败(sitekey 与网址不匹配、超时等)，不扣积分"],
           ["ERROR_SERVICE_UNAVALIABLE", "服务暂不可用，稍后重试"],
         ].map(([c, d]) => [mono(c), d])),
-        para(`${v1 ? "/solve 与 /v1" : "/solve"} 用 HTTP 状态码表示错误：`),
+        para("/solve 用 HTTP 状态码表示错误："),
         simpleTable(["状态码", "说明"], [
           ["400", "请求格式错误"],
           ["401", "缺少或错误的令牌"],
           ["402", "积分或令牌额度不足"],
-          v1 ? ["403", "令牌不支持该命令(/v1 的 session 相关命令)，或功能未开放"] : null,
           ["422", "参数校验失败，或 Turnstile 返回错误(sitekey 与域名不匹配)"],
           ["429", "繁忙，稍后重试"],
           ["500", "求解失败或超时，不扣积分"],
           ["503", "服务暂不可用，稍后重试"],
-        ].filter(Boolean))),
+        ])),
 
       section("faq", "常见问题",
         simpleTable(["问题", "说明"], [
@@ -1191,9 +1126,8 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
           ["站点校验 UA", "提交时使用 solution.userAgent(Turnstile 不支持代理，求解不经过你的出口 IP)"],
           ["失败会扣积分吗", "不会。失败、超时、10 分钟内未取结果的任务都会自动退还"],
           ["返回繁忙", "当前所有求解名额已满，稍后重试；负载高时会自动增加机器，约 2–3 分钟生效"],
-          v1 ? ["5 秒盾 cookie 在本地无效", "cf_clearance 与出口 IP、UA 绑定，见「5 秒盾」的复用说明"] : null,
-        ].filter(Boolean))),
-    ].filter(Boolean));
+        ])),
+    ]);
 
     toc.append(h("div", { class: "toolbar", style: "gap:6px" }, sections.map(([id, title, el]) =>
       h("button", { class: "btn sm", type: "button", onclick: () => el.scrollIntoView({ behavior: "smooth", block: "start" }) }, title))));
@@ -1514,11 +1448,9 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
     const o = await api("GET", "/api/admin/option");
     const name = h("input", { class: "input", value: o.system_name, maxlength: 30 });
     const price = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.price_turnstile });
-    const priceV1 = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.price_v1 });
     const gift = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.new_user_quota });
     const REGISTER_METHODS = [["password", "密码"], ["github", "GitHub"], ["linuxdo", "LINUX DO"]];
     const reg = Object.fromEntries(REGISTER_METHODS.map(([key]) => [key, switchInput(o[`register_${key}_enabled`] === "true")]));
-    const v1On = switchInput(o.v1_enabled === "true");
     const oauthOnlyOn = switchInput(o.oauth_only_enabled === "true");
     const cfToken = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: o.cf_api_token_set ? "已设置，留空不修改" : "" });
     const saveCf = h("button", { class: "btn primary", type: "submit" }, "保存");
@@ -1531,23 +1463,20 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
           save.disabled = true;
           try {
             const saved = await api("PUT", "/api/admin/option", {
-              system_name: name.value.trim(), price_turnstile: Number(price.value), price_v1: Number(priceV1.value),
-              new_user_quota: Number(gift.value), v1_enabled: v1On.input.checked, oauth_only_enabled: oauthOnlyOn.input.checked,
+              system_name: name.value.trim(), price_turnstile: Number(price.value),
+              new_user_quota: Number(gift.value), oauth_only_enabled: oauthOnlyOn.input.checked,
               ...Object.fromEntries(REGISTER_METHODS.map(([key]) => [`register_${key}_enabled`, reg[key].input.checked])),
             });
             sys.system_name = saved.system_name;
             sys.price_turnstile = Number(saved.price_turnstile);
             sys.oauth_only = saved.oauth_only_enabled === "true" && Boolean(sys.github_oauth || sys.linuxdo_oauth);
             sys.password_register = saved.register_password_enabled === "true" && !sys.oauth_only;
-            sys.v1_enabled = saved.v1_enabled === "true";
             setSystemName(saved.system_name);
             toast("已保存");
           } catch (err) { toast(err.message, true); } finally { save.disabled = false; }
         } },
         field("系统名称", name),
         field("求解价格", price, "积分 / 次，成功才扣"),
-        h("div", { class: "field-row" }, h("span", {}, "5 秒盾(/v1)", h("div", { class: "hint" }, "关闭后用户令牌不能调用 /v1，现有 API Key 不受影响")), v1On.el),
-        field("5 秒盾价格", priceV1, "积分 / 次，成功才扣"),
         h("div", { class: "field" }, "开放注册",
           h("div", { class: "toggles" }, REGISTER_METHODS.map(([key, label]) => h("span", {}, label, reg[key].el))),
           h("span", { class: "hint" }, "关闭的方式不能注册新账号，已有账号仍可登录；GitHub 和 LINUX DO 还需在各自的登录设置中启用")),

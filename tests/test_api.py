@@ -21,50 +21,17 @@ AUTH = {"X-API-Key": KEY}
 
 
 class FakeFlareSolverr:
-    """模拟 FlareSolverr 的 /health 与 /v1;url 中的关键字决定行为。"""
+    """模拟 FlareSolverr 的 /health 与首页(网关只用它们做健康检查)。"""
 
     def __init__(self) -> None:
         self.down = False
-        self.payloads: list[dict] = []
-        self.sessions: set[str] = set()
 
     async def handler(self, request: httpx.Request) -> httpx.Response:
         if self.down:
             raise httpx.ConnectError("connection refused")
         if request.url.path == "/health":
             return httpx.Response(200, json={"status": "ok"})
-        payload = json.loads(request.content)
-        self.payloads.append(payload)
-        cmd = payload.get("cmd")
-        if cmd == "sessions.create":
-            sid = payload.get("session") or f"uuid-{len(self.sessions) + 1}"
-            self.sessions.add(sid)
-            return httpx.Response(200, json={"status": "ok", "message": "Session created successfully.", "session": sid})
-        if cmd == "sessions.list":
-            return httpx.Response(200, json={"status": "ok", "message": "", "sessions": sorted(self.sessions)})
-        if cmd == "sessions.destroy":
-            if payload.get("session") not in self.sessions:
-                return httpx.Response(500, json={"status": "error", "message": "Error: The session doesn't exist."})
-            self.sessions.discard(payload["session"])
-            return httpx.Response(200, json={"status": "ok", "message": "The session has been removed."})
-        url = payload.get("url", "")
-        if payload.get("session"):
-            self.sessions.add(payload["session"])
-        if "slow" in url:
-            await asyncio.sleep(0.3)
-        if "fail" in url:
-            return httpx.Response(
-                500, json={"status": "error", "message": "Error: Error solving the challenge. Timeout after 60.0 seconds."}
-            )
-        return httpx.Response(
-            200,
-            json={
-                "status": "ok",
-                "message": "Challenge not detected!",
-                "version": "3.5.2",
-                "solution": {"url": url, "status": 200, "cookies": [], "userAgent": "UA", "turnstile_token": "tok"},
-            },
-        )
+        return httpx.Response(200, json={"msg": "FlareSolverr is ready!", "version": "3.5.2", "userAgent": "UA"})
 
 
 @pytest.fixture
@@ -115,67 +82,47 @@ def make_client(fake):
 
 
 def async_app(fake: FakeFlareSolverr, **overrides):
-    """不经 lifespan,直接挂上 backend,便于用 ASGITransport 并发请求。"""
+    """不经 lifespan,直接挂上 backend 与求解器,便于用 ASGITransport 并发请求。"""
     settings = Settings(**{"api_key": KEY, **overrides})
     app = create_app(settings)
     app.state.backend = FlareSolverr(settings, transport=httpx.MockTransport(fake.handler))
-    app.state.solver = FakeTurnstileSolver(app.state.backend.slots, 1, "/app")
+    app.state.solver = FakeTurnstileSolver(Slots(settings.max_concurrency, settings.max_queue), 1, "/app")
     return app
 
 
-GET = {"cmd": "request.get", "url": "https://example.com/"}
+SOLVE = {"url": "https://example.com/login", "sitekey": "0x4AAAAAAA", "action": "login"}
 
 
 def test_auth(make_client):
     with make_client() as c:
-        r = c.post("/v1", json=GET)
+        r = c.post("/solve", json=SOLVE)
         assert r.status_code == 401
         assert r.json() == {"status": "error", "message": "缺少或错误的 API Key", "code": "unauthorized"}
-        assert c.post("/v1", json=GET, headers={"X-API-Key": "wrong"}).status_code == 401
-        assert c.post("/v1", json=GET, headers={"Authorization": f"Bearer {KEY}"}).status_code == 200
+        assert c.post("/solve", json=SOLVE, headers={"X-API-Key": "wrong"}).status_code == 401
+        assert c.post("/solve", json=SOLVE, headers={"Authorization": f"Bearer {KEY}"}).status_code == 200
         assert c.get("/health").status_code == 200
 
 
-def test_request_passthrough_and_timeout_cap(make_client, fake):
-    with make_client(max_timeout=85) as c:
-        r = c.post("/v1", json={**GET, "maxTimeout": 300000, "tabs_till_verify": 1}, headers=AUTH)
-        assert r.status_code == 200
-        body = r.json()
-        assert body["status"] == "ok" and body["solution"]["turnstile_token"] == "tok"
-        sent = fake.payloads[-1]
-        assert sent["maxTimeout"] == 85000
-        assert sent["tabs_till_verify"] == 1
-
-
-def test_flaresolverr_errors_pass_through(make_client):
+def test_flaresolverr_interface_is_gone(make_client):
+    # 5 秒盾(/v1)已下线
     with make_client() as c:
-        r = c.post("/v1", json={**GET, "url": "https://fail.example/"}, headers=AUTH)
-        assert r.status_code == 500
-        assert r.json()["message"].startswith("Error: Error solving the challenge")
-
-
-def test_invalid_json(make_client):
-    with make_client() as c:
-        r = c.post("/v1", content=b"not json", headers={**AUTH, "Content-Type": "application/json"})
-        assert r.status_code == 400 and r.json()["code"] == "invalid_request"
+        assert c.post("/v1", json={"cmd": "request.get", "url": "https://example.com/"}, headers=AUTH).status_code == 404
 
 
 def test_backend_unavailable(make_client, fake):
     with make_client() as c:
         fake.down = True
-        r = c.post("/v1", json=GET, headers=AUTH)
-        assert r.status_code == 503
-        assert r.json()["code"] == "backend_unavailable"
         h = c.get("/health").json()
         assert h["status"] == "degraded" and h["backend"] == "down"
 
 
 def test_health_reports_backend_and_counters(make_client):
     with make_client(worker_id="w/a", max_concurrency=6) as c:
-        c.post("/v1", json=GET, headers=AUTH)
+        c.post("/solve", json=SOLVE, headers=AUTH)
         h = c.get("/health").json()
         assert h["status"] == "ok" and h["backend"] == "ok" and h["backend_version"] == "3.5.2"
-        assert h["worker"] == "w/a" and h["capacity"] == 6 and h["completed"] == 1
+        assert h["worker"] == "w/a" and h["capacity"] == 6 and h["solved"] == 1
+        assert c.get("/").json()["version"] == "3.5.2"
 
 
 def test_busy_when_slots_and_queue_full(fake):
@@ -183,8 +130,8 @@ def test_busy_when_slots_and_queue_full(fake):
 
     async def run():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
-            body = {**GET, "url": "https://slow.example/"}
-            return await asyncio.gather(*(client.post("/v1", json=body, headers=AUTH) for _ in range(3)))
+            body = {**SOLVE, "sitekey": "wait"}
+            return await asyncio.gather(*(client.post("/solve", json=body, headers=AUTH) for _ in range(3)))
 
     responses = asyncio.run(run())
     assert sorted(r.status_code for r in responses) == [200, 200, 429]
@@ -192,53 +139,7 @@ def test_busy_when_slots_and_queue_full(fake):
     assert busy.json()["code"] == "busy" and busy.headers["retry-after"] == "2"
 
 
-def test_light_commands_do_not_take_slots(fake):
-    app = async_app(fake, max_concurrency=1, max_queue=1)
-
-    async def run():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
-            slow = [client.post("/v1", json={**GET, "url": "https://slow.example/"}, headers=AUTH) for _ in range(2)]
-            light = client.post("/v1", json={"cmd": "sessions.list"}, headers=AUTH)
-            return await asyncio.gather(*slow, light)
-
-    *_, listed = asyncio.run(run())
-    assert listed.status_code == 200
-
-
-def test_session_limit_and_tracking(make_client):
-    with make_client(max_sessions=1) as c:
-        r = c.post("/v1", json={"cmd": "sessions.create", "session": "s1"}, headers=AUTH)
-        assert r.status_code == 200 and r.json()["session"] == "s1"
-        r = c.post("/v1", json={"cmd": "sessions.create", "session": "s2"}, headers=AUTH)
-        assert r.status_code == 429 and r.json()["code"] == "session_limit"
-        # 已存在的会话再次 create 不受上限影响
-        assert c.post("/v1", json={"cmd": "sessions.create", "session": "s1"}, headers=AUTH).status_code == 200
-        assert c.post("/v1", json={"cmd": "sessions.destroy", "session": "s1"}, headers=AUTH).status_code == 200
-        assert c.post("/v1", json={"cmd": "sessions.create", "session": "s2"}, headers=AUTH).status_code == 200
-        assert c.get("/health").json()["sessions"] == 1
-
-
-def test_idle_sessions_are_swept(fake):
-    backend = FlareSolverr(Settings(session_idle_ttl=60), transport=httpx.MockTransport(fake.handler))
-
-    async def run():
-        await backend.call({"cmd": "sessions.create", "session": "idle"})
-        await backend.call({"cmd": "sessions.create", "session": "busy"})
-        backend.sessions["idle"] = time.monotonic() - 120  # 闲置超过 60 秒
-        fake.sessions.add("orphan")  # 网关不知道的会话:先记为刚见到,不立即清理
-        destroyed = await backend.sweep()
-        await backend.stop()
-        return destroyed
-
-    assert asyncio.run(run()) == ["idle"]
-    assert fake.sessions == {"busy", "orphan"}
-    assert set(backend.sessions) == {"busy", "orphan"}
-
-
 # ---------------------------------------------------------------- /solve
-SOLVE = {"url": "https://example.com/login", "sitekey": "0x4AAAAAAA", "action": "login"}
-
-
 def test_solve_returns_token(make_client):
     with make_client(default_timeout=40) as c:
         r = c.post("/solve", json=SOLVE, headers=AUTH)
@@ -631,7 +532,6 @@ def test_draining_worker_refuses_new_work_but_serves_results(make_client, tmp_pa
         refused = c.post("/createTask", json={"clientKey": KEY, "task": task}).json()
         assert refused["errorCode"] == "ERROR_NO_SLOT_AVAILABLE"
         assert c.post("/solve", json=SOLVE, headers=AUTH).status_code == 429
-        assert c.post("/v1", json=GET, headers=AUTH).status_code == 429
         # 已创建的任务照常返回结果
         for _ in range(50):
             result = c.post("/getTaskResult", json={"clientKey": KEY, "taskId": created["taskId"]}).json()
