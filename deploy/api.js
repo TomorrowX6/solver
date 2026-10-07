@@ -249,7 +249,7 @@ function htmlRedirect(target, cookies = []) {
   return new Response(`<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${href}"><a href="${href}">继续</a>`, { headers });
 }
 const clearOauthCookie = `${OAUTH_COOKIE}=; Path=/api/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
-const oauthError = (message) => htmlRedirect(`/admin#oauth_error=${encodeURIComponent(message)}`, [clearOauthCookie]);
+const oauthError = (message) => htmlRedirect(`/#oauth_error=${encodeURIComponent(message)}`, [clearOauthCookie]);
 
 const oauthStart = (key) => async (c) => {
   const p = OAUTH[key];
@@ -312,7 +312,7 @@ const oauthCallback = (key) => async (c) => {
     // 绑定到发起绑定的账号
     if (owner && owner.id !== pending.user_id) return oauthError(`该 ${p.name} 账号已绑定其他用户`);
     await c.env.DB.prepare(`UPDATE users SET ${idCol} = ?, ${loginCol} = ? WHERE id = ?`).bind(account.id, account.login, pending.user_id).run();
-    return htmlRedirect("/admin#personal", [clearOauthCookie]);
+    return htmlRedirect("/#personal", [clearOauthCookie]);
   }
 
   let user = owner;
@@ -332,7 +332,7 @@ const oauthCallback = (key) => async (c) => {
   }
   if (user.status !== 1) return oauthError("账号已禁用");
   const session = await startSession(c.env, user);
-  return htmlRedirect("/admin#dashboard", [session["set-cookie"], clearOauthCookie]);
+  return htmlRedirect("/#dashboard", [session["set-cookie"], clearOauthCookie]);
 };
 
 // ------------------------------------------------------------------ 个人

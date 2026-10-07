@@ -7,10 +7,10 @@
 //   * POST /v1 带 session:按会话名哈希固定到一个位置(FlareSolverr 的会话只存在于创建它的那台);
 //     sessions.create 未指定会话名时由这里生成,保证创建与后续请求落在同一位置;
 //   * POST /v1 sessions.list:并行查询所有位置并合并;
-//   * GET /admin:控制台页面;/api/*:控制台接口(见 api.js);
+//   * GET /(浏览器打开,Accept 含 text/html):控制台页面,旧入口 /admin 跳转到这里;/api/*:控制台接口(见 api.js);
 //   * 其他请求:随机打乱各条隧道的顺序依次尝试,遇到可重试的结果就换下一条。
 //
-// 计费:初始化(/admin 首次使用)后,用户令牌 sk-… 调用接口时预扣积分,成功结算、失败退还;
+// 计费:初始化(控制台首次使用)后,用户令牌 sk-… 调用接口时预扣积分,成功结算、失败退还;
 // worker 的 API Key(根密钥)照常可用且不计费。未初始化时行为与之前相同。
 
 import ADMIN_HTML from "./admin.html";
@@ -45,6 +45,7 @@ const ADMIN_PAGE_HEADERS = {
   "x-frame-options": "DENY",
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
+  vary: "accept",
 };
 
 function shuffle(items) {
@@ -459,9 +460,15 @@ export default {
     const rt = new Relay(request, env, ctx, url);
     await rt.init();
 
-    if (url.pathname === "/admin" || url.pathname === "/admin/") {
-      if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });
+    // 控制台在站点根路径;不要求 HTML 的 GET /(API 客户端、FlareSolverr 的就绪检查)照常转发给 worker
+    const isGet = request.method === "GET" || request.method === "HEAD";
+    if (url.pathname === "/" && isGet && (request.headers.get("accept") || "").includes("text/html")) {
       return new Response(request.method === "HEAD" ? null : ADMIN_HTML, { headers: ADMIN_PAGE_HEADERS });
+    }
+    if (url.pathname === "/admin" || url.pathname === "/admin/") {
+      // 旧入口:浏览器跳转时保留 #页面(/admin#docs → /#docs)
+      if (!isGet) return new Response(null, { status: 405 });
+      return new Response(null, { status: 302, headers: { location: "/", "cache-control": "no-store" } });
     }
     // 轮换器读取各 worker 的负载(根密钥)
     if (url.pathname === "/api/fleet" && request.method === "GET") {

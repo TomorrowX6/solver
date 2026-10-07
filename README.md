@@ -97,12 +97,12 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 - `cf_clearance` 与 User-Agent、出口 IP 绑定:要在自己的程序里复用,请求时带 `proxy`(例如 `{"url": "http://user:pass@host:port"}`),
   让求解经你的代理出口,之后用同一代理、响应里的 `userAgent` 和 cookies 访问。
 
-### 控制台与积分 `GET /admin`
+### 控制台与积分
 
-`https://solver.000.moe/admin`(由 Cloudflare Worker 提供,数据存于 D1,参照 NewAPI):用户、令牌(`sk-…`)、积分、兑换码、使用日志、渠道状态、系统设置。
+`https://solver.000.moe`(由 Cloudflare Worker 提供,数据存于 D1,参照 NewAPI):用户、令牌(`sk-…`)、积分、兑换码、使用日志、渠道状态、系统设置。
 
 - 首次打开时初始化超级管理员,需填写现有的 API Key(校验后作为转发 worker 的根密钥保存)。
-- 调用方文档在控制台「使用文档」页,未登录也可访问:`https://solver.000.moe/admin#docs`。
+- 调用方文档在控制台「使用文档」页,未登录也可访问:`https://solver.000.moe/#docs`。
 - 用户令牌即 `clientKey` / `X-API-Key`:创建任务时预扣积分,求解成功才结算,失败或 10 分钟未取结果自动退还;`getBalance` 返回账户余额。
 - 现有的 API Key 照常可用且不计费;用户令牌只能用 `/v1` 的 `request.get` / `request.post`(不能用会话)。
 - 「系统设置」可关闭 5 秒盾(`/v1`):关闭后用户令牌调用 `/v1` 返回 403,使用文档中也不再展示,现有 API Key 不受影响。
