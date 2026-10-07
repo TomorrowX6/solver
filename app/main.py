@@ -35,7 +35,6 @@ log = logging.getLogger("gateway.api")
 _ERROR_STATUS = {
     "unauthorized": 401,
     "invalid_request": 400,
-    "invalid_proxy": 400,
     "turnstile_error": 422,
     "busy": 429,
     "session_limit": 429,
@@ -227,7 +226,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
             raise TaskError("ERROR_INVALID_TASK_DATA", "请求体必须是 JSON 对象")
         return body
 
-    @app.post("/createTask", tags=["tasks"], summary="创建 Turnstile 任务(TurnstileTaskProxyless / TurnstileTask)")
+    @app.post("/createTask", tags=["tasks"], summary="创建 Turnstile 任务(TurnstileTaskProxyless)")
     async def create_task(request: Request) -> dict:
         try:
             body = await json_body(request)
@@ -274,7 +273,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         timeout = min(body.timeout or settings.default_timeout, settings.max_timeout)
         try:
             result = await solver_of(request).solve(
-                str(body.url), body.sitekey, body.action, body.cdata, body.proxy, timeout, settings.attempt_timeout
+                str(body.url), body.sitekey, body.action, body.cdata, timeout, settings.attempt_timeout
             )
         except BackendError as e:
             log.warning("solve %s rejected [%s]: %s", body.url, e.code, e.message)

@@ -30,6 +30,10 @@ const RETRY_STATUS = new Set([429, 502, 503, 504, 520, 521, 522, 523, 524, 525, 
 // 打码平台风格接口(HTTP 一律 200,用 errorCode 表示错误):这些错误码说明该 worker 没处理请求,可以改投
 const TASK_RETRY_CODES = new Set(["ERROR_NO_SLOT_AVAILABLE", "ERROR_SERVICE_UNAVALIABLE"]);
 
+// Turnstile 不支持经调用方的代理求解。网关同样拒绝;用户令牌的请求在这里先拦下,
+// 还没重装升级的服务器渠道也就不会再接受代理
+const PROXY_TASK_TYPES = new Set(["turnstiletask", "antiturnstiletask"]);
+
 // 隧道没有连接器(位置未启用或 worker 已下线):30 秒内排到最后再试,避免每个请求都先撞一次
 const OFFLINE_STATUS = new Set([502, 521, 522, 523, 530]);
 const offlineUntil = new Map();
@@ -306,6 +310,8 @@ function bearerKey(request) {
 }
 
 async function billedCreateTask(rt, payload, auth, root) {
+  const type = String((payload.task && payload.task.type) || "");
+  if (PROXY_TASK_TYPES.has(type.toLowerCase())) return taskError("ERROR_TASK_NOT_SUPPORTED", `不支持带代理的 ${type}，请使用 TurnstileTaskProxyless`);
   const cost = intOption(await getOptions(rt.env), "price_turnstile");
   const denied = await reserve(rt.env, auth, cost);
   if (denied) return taskError("ERROR_ZERO_BALANCE", denied);
@@ -416,6 +422,7 @@ async function relayBilled(rt, root, body) {
     if (!payload) return error(400, "invalid_request", "请求体不是合法的 JSON");
     const options = await getOptions(env);
     if (path === "/solve") {
+      if (payload.proxy != null && payload.proxy !== "") return error(422, "invalid_request", "不支持 proxy，Turnstile 由服务端直接求解，请去掉该字段");
       return billedSync(rt, body, auth, root, {
         cost: intOption(options, "price_turnstile"),
         content: "Turnstile(同步)",

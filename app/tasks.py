@@ -18,7 +18,6 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
 
 from .backend import BackendError
 from .turnstile import TurnstileSolver
@@ -26,6 +25,7 @@ from .turnstile import TurnstileSolver
 log = logging.getLogger("gateway.tasks")
 
 # 不区分大小写;同时接受 YesCaptcha / 2Captcha / CapSolver 的类型名
+# 不支持经调用方的代理求解:带代理的类型名(TurnstileTask)明确拒绝,而不是悄悄忽略代理
 PROXYLESS_TYPES = {"turnstiletaskproxyless", "antiturnstiletaskproxyless"}
 PROXY_TYPES = {"turnstiletask", "antiturnstiletask"}
 
@@ -33,7 +33,6 @@ PROXY_TYPES = {"turnstiletask", "antiturnstiletask"}
 _ERROR_CODES = {
     "busy": "ERROR_NO_SLOT_AVAILABLE",
     "solver_unavailable": "ERROR_SERVICE_UNAVALIABLE",
-    "invalid_proxy": "ERROR_INVALID_TASK_DATA",
     "turnstile_error": "ERROR_CAPTCHA_UNSOLVABLE",
     "timeout": "ERROR_CAPTCHA_UNSOLVABLE",
     "page_error": "ERROR_CAPTCHA_UNSOLVABLE",
@@ -57,7 +56,6 @@ class TaskParams:
     sitekey: str
     action: str | None = None
     cdata: str | None = None
-    proxy: str | None = None
 
 
 @dataclass
@@ -80,38 +78,14 @@ def _first(*values: Any) -> str | None:
     return None
 
 
-def parse_proxy(task: dict[str, Any]) -> str | None:
-    """支持两种写法:CapSolver 的 proxy 字符串(http:host:port:user:pass 或 URL),
-    以及 Anti-Captcha / YesCaptcha 的 proxyType + proxyAddress + proxyPort + proxyLogin + proxyPassword。"""
-    raw = task.get("proxy")
-    if isinstance(raw, str) and raw.strip():
-        raw = raw.strip()
-        if "://" in raw:
-            return raw
-        parts = raw.split(":")
-        if len(parts) in (3, 5) and parts[0].lower() in {"http", "https", "socks5"}:
-            scheme, host, port = parts[0].lower(), parts[1], parts[2]
-            auth = f"{quote(parts[3], safe='')}:{quote(parts[4], safe='')}@" if len(parts) == 5 else ""
-            return f"{scheme}://{auth}{host}:{port}"
-        if len(parts) in (2, 4):  # host:port[:user:pass]
-            auth = f"{quote(parts[2], safe='')}:{quote(parts[3], safe='')}@" if len(parts) == 4 else ""
-            return f"http://{auth}{parts[0]}:{parts[1]}"
-        raise TaskError("ERROR_INVALID_TASK_DATA", "proxy 格式应为 http:host:port[:user:pass] 或 scheme://user:pass@host:port")
-    address, port = task.get("proxyAddress"), task.get("proxyPort")
-    if address and port:
-        scheme = str(task.get("proxyType") or "http").lower()
-        login, password = task.get("proxyLogin"), task.get("proxyPassword")
-        auth = f"{quote(str(login), safe='')}:{quote(str(password or ''), safe='')}@" if login else ""
-        return f"{scheme}://{auth}{address}:{port}"
-    return None
-
-
 def parse_task(task: Any) -> TaskParams:
     if not isinstance(task, dict):
         raise TaskError("ERROR_INVALID_TASK_DATA", "缺少 task 对象")
     kind = str(task.get("type") or "").lower()
-    if kind not in PROXYLESS_TYPES | PROXY_TYPES:
-        raise TaskError("ERROR_TASK_NOT_SUPPORTED", f"不支持的任务类型 {task.get('type')!r}，支持 TurnstileTaskProxyless / TurnstileTask")
+    if kind in PROXY_TYPES:
+        raise TaskError("ERROR_TASK_NOT_SUPPORTED", f"不支持带代理的 {task.get('type')}，请使用 TurnstileTaskProxyless")
+    if kind not in PROXYLESS_TYPES:
+        raise TaskError("ERROR_TASK_NOT_SUPPORTED", f"不支持的任务类型 {task.get('type')!r}，支持 TurnstileTaskProxyless")
     url = _first(task.get("websiteURL"), task.get("websiteUrl"))
     sitekey = _first(task.get("websiteKey"))
     if not url or not url.startswith(("http://", "https://")):
@@ -121,10 +95,7 @@ def parse_task(task: Any) -> TaskParams:
     metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
     action = _first(task.get("action"), task.get("pageAction"), metadata.get("action"))
     cdata = _first(task.get("cdata"), task.get("data"), metadata.get("cdata"))
-    proxy = parse_proxy(task) if kind in PROXY_TYPES else None
-    if kind in PROXY_TYPES and not proxy:
-        raise TaskError("ERROR_INVALID_TASK_DATA", "TurnstileTask 需要提供代理")
-    return TaskParams(url=url, sitekey=sitekey, action=action, cdata=cdata, proxy=proxy)
+    return TaskParams(url=url, sitekey=sitekey, action=action, cdata=cdata)
 
 
 def new_task_id(prefix: str) -> str:
@@ -216,7 +187,7 @@ class TaskManager:
         p = item.params
         try:
             result = await self._solver.solve(
-                p.url, p.sitekey, p.action, p.cdata, p.proxy, self._timeout, self._attempt_timeout, admit_check=False
+                p.url, p.sitekey, p.action, p.cdata, self._timeout, self._attempt_timeout, admit_check=False
             )
         except BackendError as e:
             item.status = "failed"

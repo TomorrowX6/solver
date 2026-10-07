@@ -23,7 +23,7 @@
     FLEET_MIN: "2"
     FLEET_MAX: "4"
     # 上线新版本时把这个数字加一并推送,轮换器会按错开规则逐个替换旧版本 worker
-    FLEET_VERSION: "11"
+    FLEET_VERSION: "12"
     # 账号最多同时运行 6 个 CPU 开发环境(含其他仓库与自检环境),超出会被平台拒绝
     FLEET_MAX_WORKSPACES: "6"
   stages:

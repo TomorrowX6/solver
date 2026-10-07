@@ -20,7 +20,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from .backend import BackendError, Slots
 from .stats import SolveLog
@@ -156,20 +156,6 @@ class SolveFailed(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-def proxy_for_flaresolverr(proxy: str | None) -> dict | None:
-    """把 http://user:pass@host:port 转成 FlareSolverr get_webdriver 需要的格式。"""
-    if not proxy:
-        return None
-    parts = urlsplit(proxy if "://" in proxy else f"http://{proxy}")
-    if parts.scheme not in {"http", "https", "socks5"} or not parts.hostname or not parts.port:
-        raise SolveFailed("invalid_proxy", "代理格式应为 scheme://[user:pass@]host:port")
-    result = {"url": f"{parts.scheme}://{parts.hostname}:{parts.port}"}
-    if parts.username:
-        result["username"] = unquote(parts.username)
-        result["password"] = unquote(parts.password or "")
-    return result
 
 
 def candidate_pages(url: str, mode: str) -> list[str]:
@@ -312,14 +298,12 @@ class TurnstileSolver:
         sitekey: str,
         action: str | None,
         cdata: str | None,
-        proxy: str | None,
         timeout: float,
         attempt_timeout: float,
         admit_check: bool = True,
     ) -> SolveResult:
         if not self.available:
             raise BackendError("solver_unavailable", f"求解器不可用: {self.unavailable_reason}")
-        driver_proxy = proxy_for_flaresolverr(proxy)
         config: dict[str, str] = {"sitekey": sitekey, "retry": "auto", "refresh-expired": "auto"}
         if action:
             config["action"] = action
@@ -337,7 +321,7 @@ class TurnstileSolver:
                 budget = min(attempt_timeout, deadline - time.monotonic())
                 try:
                     token, page = await asyncio.get_running_loop().run_in_executor(
-                        self._executor, self._solve_blocking, url, config, driver_proxy, budget
+                        self._executor, self._solve_blocking, url, config, budget
                     )
                 except Exception as e:  # noqa: BLE001
                     if not isinstance(e, SolveFailed):
@@ -347,9 +331,9 @@ class TurnstileSolver:
                     reason = re.sub(r"(组件卡住)\(.*?\)", r"\1", f"{e.code}: {e.message}")[:80]
                     self.attempt_errors[reason] = self.attempt_errors.get(reason, 0) + 1
                     log.warning("attempt %d failed for %s [%s]: %s", attempts, url, e.code, e.message)
-                    # 配置错误、代理错误是确定性的,不重试;页面加载不了组件可能是网络暂时不通(重试一次),
+                    # 配置错误是确定性的,不重试;页面加载不了组件可能是网络暂时不通(重试一次),
                     # 也可能是 CSP 拦截(重试也没用),所以最多重试一次
-                    if e.code in ("turnstile_error", "invalid_proxy") or (e.code == "page_error" and attempts >= 2):
+                    if e.code == "turnstile_error" or (e.code == "page_error" and attempts >= 2):
                         break
                     continue
                 self.solved += 1
@@ -363,11 +347,11 @@ class TurnstileSolver:
         self.history.record(url, sitekey, False, time.monotonic() - started, attempts, f"{last.code}: {last.message}")
         raise BackendError(last.code, f"{last.message}(共尝试 {attempts} 次)")
 
-    def _solve_blocking(self, url: str, config: dict, proxy: dict | None, budget: float) -> tuple[str, str]:
+    def _solve_blocking(self, url: str, config: dict, budget: float) -> tuple[str, str]:
         deadline = time.monotonic() + budget
         attempt_id = f"{time.strftime('%H%M%S')}-{random.randrange(16**4):04x}"
         launch_started = time.monotonic()
-        driver = self._utils.get_webdriver(proxy)
+        driver = self._utils.get_webdriver()
         launch = time.monotonic() - launch_started
         try:
             driver.set_page_load_timeout(max(5, min(20, budget / 2)))

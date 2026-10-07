@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, HttpUrl
+from typing import Any
+
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 # 这些字段会被写进注入页面的 JS 中,限制字符集
 _SAFE = r"^[A-Za-z0-9_\-]+$"
@@ -11,8 +13,15 @@ class SolveRequest(BaseModel):
     sitekey: str = Field(min_length=1, max_length=128, pattern=_SAFE)
     action: str | None = Field(default=None, max_length=32, pattern=_SAFE)
     cdata: str | None = Field(default=None, max_length=255, pattern=_SAFE)
-    proxy: str | None = Field(default=None, max_length=512, description="http://user:pass@host:port 或 socks5://host:port")
     timeout: float | None = Field(default=None, ge=5, description="总超时(秒),缺省使用服务端默认值")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_proxy(cls, data: Any) -> Any:
+        # 不支持经调用方的代理求解:明确拒绝,避免调用方以为请求走了代理
+        if isinstance(data, dict) and data.get("proxy") not in (None, ""):
+            raise ValueError("不支持 proxy，Turnstile 由服务端直接求解，请去掉该字段")
+        return data
 
 
 class SolveResponse(BaseModel):

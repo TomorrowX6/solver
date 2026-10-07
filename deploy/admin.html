@@ -1085,19 +1085,11 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
         code(json({ errorId: 0, errorCode: "", errorDescription: "", taskId: "1817ce94-3f2a-4b1c-9d0e-5a6b7c8d9e0f" })),
         para("task 字段"),
         simpleTable(["字段", "必填", "说明"], [
-          [mono("type"), "是", "TurnstileTaskProxyless：不使用代理；TurnstileTask：经你的代理求解(需带 proxy)"],
+          [mono("type"), "是", "TurnstileTaskProxyless(不支持代理)"],
           [mono("websiteURL"), "是", "组件所在页面的网址，域名需与 sitekey 绑定的域名一致"],
           [mono("websiteKey"), "是", "组件的 sitekey(页面中 data-sitekey 的值)"],
           [mono("metadata.action"), "否", "组件的 action(data-action)，站点设置了就必须一致"],
           [mono("metadata.cdata"), "否", "组件的 cData(data-cdata)，站点设置了就必须一致"],
-          [mono("proxy"), "TurnstileTask 必填", "见下表"],
-        ]),
-        para("代理格式(任选其一)"),
-        simpleTable(["写法", "示例"], [
-          ["URL", mono('"proxy": "http://user:pass@host:port"')],
-          ["SOCKS5", mono('"proxy": "socks5://host:port"')],
-          ["CapSolver 格式", mono('"proxy": "http:host:port:user:pass"')],
-          ["分字段", mono('"proxyType": "http", "proxyAddress": "host", "proxyPort": 8080, "proxyLogin": "user", "proxyPassword": "pass"')],
         ])),
 
       section("result", "Turnstile：获取结果",
@@ -1126,7 +1118,6 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
           [mono("sitekey"), "是", "组件的 sitekey"],
           [mono("action"), "否", "组件的 action，最长 32 个字符"],
           [mono("cdata"), "否", "组件的 cData，最长 255 个字符"],
-          [mono("proxy"), "否", "http://user:pass@host:port 或 socks5://host:port"],
           [mono("timeout"), "否", "总超时(秒)，默认 60，最大 85"],
         ]),
         para("响应"),
@@ -1175,8 +1166,8 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
         simpleTable(["errorCode", "说明"], [
           ["ERROR_KEY_DOES_NOT_EXIST", "令牌错误、已禁用或已过期"],
           ["ERROR_ZERO_BALANCE", "积分或令牌额度不足"],
-          ["ERROR_TASK_NOT_SUPPORTED", "不支持的任务类型"],
-          ["ERROR_INVALID_TASK_DATA", "缺少 websiteURL / websiteKey，或代理格式错误"],
+          ["ERROR_TASK_NOT_SUPPORTED", "不支持的任务类型(包括带代理的 TurnstileTask)"],
+          ["ERROR_INVALID_TASK_DATA", "缺少 websiteURL / websiteKey，或 websiteURL 不是 http(s) 网址"],
           ["ERROR_NO_SLOT_AVAILABLE", "繁忙，稍后重试"],
           ["ERROR_TASKID_INVALID", "taskId 不存在或已过期"],
           ["ERROR_CAPTCHA_UNSOLVABLE", "求解失败(sitekey 与网址不匹配、超时等)，不扣积分"],
@@ -1197,7 +1188,7 @@ page = requests.get("https://目标站点/other", cookies=cookies, headers={"Use
       section("faq", "常见问题",
         simpleTable(["问题", "说明"], [
           ["拿到 token 但站点验证失败", "检查 websiteURL 的域名与 sitekey 是否匹配；站点设置了 action / cData 时必须一致；token 只能用一次且 300 秒内有效"],
-          ["站点校验 IP 或 UA", "用 TurnstileTask 带你的代理，提交时使用 solution.userAgent"],
+          ["站点校验 UA", "提交时使用 solution.userAgent(Turnstile 不支持代理，求解不经过你的出口 IP)"],
           ["失败会扣积分吗", "不会。失败、超时、10 分钟内未取结果的任务都会自动退还"],
           ["返回繁忙", "当前所有求解名额已满，稍后重试；负载高时会自动增加机器，约 2–3 分钟生效"],
           v1 ? ["5 秒盾 cookie 在本地无效", "cf_clearance 与出口 IP、UA 绑定，见「5 秒盾」的复用说明"] : null,

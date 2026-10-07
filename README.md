@@ -39,10 +39,9 @@ python run.py --api-key mykey --backend-url http://127.0.0.1:8191   # 网关:htt
 {"errorId": 0, "errorCode": "", "errorDescription": "", "taskId": "1817ce94-3f2a-4b1c-9d0e-5a6b7c8d9e0f"}
 ```
 
-- `type`:`TurnstileTaskProxyless`,或带代理的 `TurnstileTask`(也接受 `AntiTurnstileTaskProxyLess` 等写法,不区分大小写)。
+- `type`:`TurnstileTaskProxyless`(也接受 `AntiTurnstileTaskProxyLess` 等写法,不区分大小写)。
+  不支持经调用方的代理求解:带代理的 `TurnstileTask` 返回 `ERROR_TASK_NOT_SUPPORTED`。
 - 可选:`metadata.action`、`metadata.cdata`(也接受顶层 `action` / `pageAction`、`cdata` / `data`),需与站点渲染组件时的参数一致。
-- 代理(`TurnstileTask`):`"proxy": "http:host:port:user:pass"`、`"proxy": "http://user:pass@host:port"`,
-  或 `proxyType` + `proxyAddress` + `proxyPort` + `proxyLogin` + `proxyPassword`。
 
 ### 获取结果 `POST /getTaskResult`
 
@@ -69,8 +68,8 @@ token 一次性使用,建议拿到后 60 秒内提交;结果在服务端保留 3
 | errorCode | 含义 |
 |---|---|
 | `ERROR_KEY_DOES_NOT_EXIST` | clientKey 错误 |
-| `ERROR_TASK_NOT_SUPPORTED` | 不支持的任务类型 |
-| `ERROR_INVALID_TASK_DATA` | 缺少 websiteURL / websiteKey、代理格式错误等 |
+| `ERROR_TASK_NOT_SUPPORTED` | 不支持的任务类型(包括带代理的 `TurnstileTask`) |
+| `ERROR_INVALID_TASK_DATA` | 缺少 task、websiteURL / websiteKey,或 websiteURL 不是 http(s) 地址 |
 | `ERROR_NO_SLOT_AVAILABLE` | 当前没有空闲名额,稍后重试 |
 | `ERROR_TASKID_INVALID` | taskId 不存在、已过期,或创建它的 worker 已轮换下线(重新创建即可) |
 | `ERROR_CAPTCHA_UNSOLVABLE` | 识别失败:sitekey 与域名不匹配、超时等,详见 errorDescription |
@@ -86,7 +85,7 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 ```
 
 出错时为 `{"status": "error", "code": "…", "message": "…"}`:401 `unauthorized`、422 `turnstile_error`(sitekey 与域名不匹配等)、
-429 `busy`、500 `timeout` / `page_error`、503 `solver_unavailable`。
+429 `busy`、500 `timeout` / `page_error`、503 `solver_unavailable`。参数校验失败(包括传入不再支持的 `proxy`)时为 422。
 
 ### FlareSolverr 接口 `POST /v1`
 

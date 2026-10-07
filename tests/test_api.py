@@ -12,9 +12,9 @@ import app.main as main_module
 from app.backend import BackendError, FlareSolverr, Slots
 from app.config import Settings
 from app.main import create_app
-from app.tasks import TaskError, new_task_id, parse_proxy, parse_task
+from app.tasks import TaskError, new_task_id, parse_task
 from app.stats import SolveLog
-from app.turnstile import SolveFailed, SolveResult, TurnstileSolver, candidate_pages, proxy_for_flaresolverr
+from app.turnstile import SolveFailed, SolveResult, TurnstileSolver, candidate_pages
 
 KEY = "s3cret"
 AUTH = {"X-API-Key": KEY}
@@ -87,10 +87,8 @@ class FakeTurnstileSolver:
 
     async def stop(self) -> None: ...
 
-    async def solve(self, url, sitekey, action, cdata, proxy, timeout, attempt_timeout, admit_check=True):
-        self.calls.append(
-            {"url": url, "sitekey": sitekey, "action": action, "cdata": cdata, "proxy": proxy, "timeout": timeout}
-        )
+    async def solve(self, url, sitekey, action, cdata, timeout, attempt_timeout, admit_check=True):
+        self.calls.append({"url": url, "sitekey": sitekey, "action": action, "cdata": cdata, "timeout": timeout})
         errors = {"badkey": "turnstile_error", "slow": "timeout", "full": "busy", "down": "solver_unavailable"}
         if sitekey in errors:
             raise BackendError(errors[sitekey], sitekey)
@@ -258,6 +256,14 @@ def test_solve_requires_key_and_valid_input(make_client):
             assert c.post("/solve", json={**SOLVE, **bad}, headers=AUTH).status_code == 422
 
 
+def test_solve_rejects_proxy(make_client):
+    with make_client() as c:
+        r = c.post("/solve", json={**SOLVE, "proxy": "http://u:p@1.2.3.4:8080"}, headers=AUTH)
+        assert r.status_code == 422 and "不支持 proxy" in r.text
+        assert not c.app.state.solver.calls
+        assert c.post("/solve", json={**SOLVE, "proxy": None}, headers=AUTH).status_code == 200
+
+
 def test_solve_timeout_is_capped(make_client):
     with make_client(max_timeout=85) as c:
         c.post("/solve", json={**SOLVE, "timeout": 300}, headers=AUTH)
@@ -285,7 +291,7 @@ class ScriptedSolver(TurnstileSolver):
         self.budgets: list[float] = []
         self.attempt_seconds = attempt_seconds
 
-    def _solve_blocking(self, url, config, proxy, budget):
+    def _solve_blocking(self, url, config, budget):
         self.budgets.append(budget)
         time.sleep(self.attempt_seconds)
         outcome = self.outcomes.pop(0)
@@ -297,7 +303,7 @@ class ScriptedSolver(TurnstileSolver):
 def run_solve(solver, timeout=60, attempt_timeout=35):
     async def go():
         try:
-            return await solver.solve("https://example.com/", "0xKEY", None, None, None, timeout, attempt_timeout)
+            return await solver.solve("https://example.com/", "0xKEY", None, None, timeout, attempt_timeout)
         finally:
             await solver.stop()
 
@@ -326,15 +332,10 @@ def test_solver_stops_retrying_when_budget_is_short():
     assert e.value.code == "timeout" and len(solver.budgets) == 1 and solver.budgets[0] <= 16
 
 
-def test_candidate_pages_and_proxy():
+def test_candidate_pages():
     assert candidate_pages("https://a.com/login?x=1", "auto") == ["https://a.com/robots.txt", "https://a.com/login?x=1"]
     assert candidate_pages("https://a.com/robots.txt", "auto") == ["https://a.com/robots.txt"]
     assert candidate_pages("https://a.com/x", "full") == ["https://a.com/x"]
-    assert proxy_for_flaresolverr(None) is None
-    assert proxy_for_flaresolverr("http://u%40x:p@h:3128") == {"url": "http://h:3128", "username": "u@x", "password": "p"}
-    assert proxy_for_flaresolverr("1.2.3.4:8080") == {"url": "http://1.2.3.4:8080"}
-    with pytest.raises(SolveFailed):
-        proxy_for_flaresolverr("ftp://h:21")
 
 
 # ---------------------------------------------------------------- createTask / getTaskResult
@@ -368,16 +369,16 @@ def test_create_and_get_task_result(make_client):
         assert c.get("/health").json()["tasks_pending"] == 0
 
 
-def test_task_metadata_and_proxy_are_passed(make_client):
+def test_task_metadata_is_passed(make_client):
     task = {
-        "type": "TurnstileTask", "websiteURL": "https://a.com/", "websiteKey": "k1",
-        "metadata": {"action": "login", "cdata": "abc"}, "proxy": "http:1.2.3.4:8080:u:p",
+        "type": "TurnstileTaskProxyless", "websiteURL": "https://a.com/", "websiteKey": "k1",
+        "metadata": {"action": "login", "cdata": "abc"},
     }
     with make_client() as c:
         task_id = c.post("/createTask", json={"clientKey": KEY, "task": task}).json()["taskId"]
         poll(c, task_id)
         call = c.app.state.solver.calls[-1]
-        assert call["action"] == "login" and call["cdata"] == "abc" and call["proxy"] == "http://u:p@1.2.3.4:8080"
+        assert call["action"] == "login" and call["cdata"] == "abc"
 
 
 @pytest.mark.parametrize(
@@ -386,7 +387,9 @@ def test_task_metadata_and_proxy_are_passed(make_client):
         ({**TASK, "type": "RecaptchaV2Task"}, "ERROR_TASK_NOT_SUPPORTED"),
         ({"type": "TurnstileTaskProxyless", "websiteURL": "https://a.com"}, "ERROR_INVALID_TASK_DATA"),
         ({**TASK, "websiteURL": "a.com"}, "ERROR_INVALID_TASK_DATA"),
-        ({**TASK, "type": "TurnstileTask"}, "ERROR_INVALID_TASK_DATA"),
+        # 不支持经调用方的代理求解
+        ({**TASK, "type": "TurnstileTask", "proxy": "http:1.2.3.4:8080:u:p"}, "ERROR_TASK_NOT_SUPPORTED"),
+        ({**TASK, "type": "AntiTurnstileTask", "proxyType": "http", "proxyAddress": "h", "proxyPort": 8080}, "ERROR_TASK_NOT_SUPPORTED"),
         (None, "ERROR_INVALID_TASK_DATA"),
     ],
 )
@@ -430,15 +433,11 @@ def test_no_slot_available_when_full(make_client):
 def test_task_parsing_helpers():
     assert new_task_id("3abc")[:4] == "3abc" and UUID_RE.match(new_task_id("3abc"))
     assert UUID_RE.match(new_task_id(""))
-    assert parse_proxy({"proxy": "socks5:h:1080"}) == "socks5://h:1080"
-    assert parse_proxy({"proxy": "h:3128:u:p@x"}) == "http://u:p%40x@h:3128"
-    assert parse_proxy({"proxy": "http://u:p@h:1"}) == "http://u:p@h:1"
-    assert parse_proxy({"proxyType": "HTTP", "proxyAddress": "h", "proxyPort": 8080, "proxyLogin": "u", "proxyPassword": "p"}) == "http://u:p@h:8080"
-    assert parse_proxy({}) is None
-    with pytest.raises(TaskError):
-        parse_proxy({"proxy": "nonsense"})
     p = parse_task({"type": "antiturnstiletaskproxyless", "websiteURL": "https://a.com", "websiteKey": "k", "action": "x", "data": "y"})
-    assert (p.action, p.cdata, p.proxy) == ("x", "y", None)
+    assert (p.action, p.cdata) == ("x", "y")
+    with pytest.raises(TaskError) as e:
+        parse_task({"type": "TurnstileTask", "websiteURL": "https://a.com", "websiteKey": "k", "proxy": "h:1"})
+    assert e.value.code == "ERROR_TASK_NOT_SUPPORTED" and "TurnstileTaskProxyless" in e.value.description
 
 
 def test_widget_page_embeds_config_safely():
@@ -503,8 +502,8 @@ def test_warm_up_failure_is_retried(monkeypatch):
             if solver.available:
                 break
             await asyncio.sleep(0.01)
-        solver._solve_blocking = lambda url, config, proxy, budget: ("tok", "page")
-        result = await solver.solve("https://a.com/", "k", None, None, None, 30, 20)
+        solver._solve_blocking = lambda url, config, budget: ("tok", "page")
+        result = await solver.solve("https://a.com/", "k", None, None, 30, 20)
         await solver.stop()
         return result
 
@@ -572,9 +571,9 @@ def test_navigation_timeout_retries_same_page():
 
     driver = Driver()
     solver = TurnstileSolver(Slots(1, 0), 1, "/nonexistent")
-    solver._utils = types.SimpleNamespace(get_webdriver=lambda proxy: driver)
+    solver._utils = types.SimpleNamespace(get_webdriver=lambda: driver)
     solver._wait_for_token = lambda driver, deadline, load_deadline, attempt_id: ("token:tok", {"clicks": 1})
-    token, page = solver._solve_blocking("https://a.com/login", {"sitekey": "k"}, None, 30)
+    token, page = solver._solve_blocking("https://a.com/login", {"sitekey": "k"}, 30)
     assert token == "tok" and page == "https://a.com/robots.txt"
     assert driver.visits == ["https://a.com/robots.txt", "https://a.com/robots.txt"]
 
