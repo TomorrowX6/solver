@@ -126,6 +126,12 @@
     border-radius: 8px; color: var(--text2); text-decoration: none; font-weight: 600; white-space: nowrap; }
   .nav:hover { background: var(--fill); color: var(--text); }
   .nav.active { background: var(--primary-light); color: var(--primary); }
+  /* 二级菜单:父项只负责展开 / 收起,子项缩进到父项文字的位置 */
+  button.nav { width: 100%; border: 0; background: none; font: inherit; cursor: pointer; text-align: left; }
+  .nav-parent.current { color: var(--text); }
+  .nav-parent .caret { margin-left: auto; width: 14px; height: 14px; transition: transform .2s; }
+  .nav-parent.open .caret { transform: rotate(180deg); }
+  .nav.sub { height: 34px; padding-left: 38px; font-weight: 500; }
   .content { flex: 1; min-width: 0; padding: 20px 24px 32px; overflow-y: auto; }
   .page { display: grid; gap: 16px; max-width: 1400px; grid-template-columns: minmax(0, 1fr); }
   .page-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -202,6 +208,7 @@
   .toggles { display: flex; flex-wrap: wrap; gap: 8px 24px; font-weight: 400; }
   .toggles > span { display: inline-flex; align-items: center; gap: 8px; }
   .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .narrow { max-width: 720px; }
   .stack { display: grid; gap: 16px; align-content: start; grid-template-columns: minmax(0, 1fr); }
   .token-box { word-break: break-all; background: var(--fill); border-radius: 8px; padding: 12px; max-height: 220px; overflow: auto; }
   .big-num { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -227,6 +234,8 @@
   .auth .divider { display: flex; align-items: center; gap: 10px; color: var(--text3); font-size: 12px; }
   .auth .divider::before, .auth .divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
   a.btn { text-decoration: none; }
+  .text-link { color: var(--primary); text-decoration: none; }
+  .text-link:hover { text-decoration: underline; }
 
   .doc h3 { font-size: 15px; margin-bottom: 10px; }
   .doc p { margin: 10px 0 8px; color: var(--text2); }
@@ -255,6 +264,8 @@
     }
     .side-group { display: none; }
     .nav { margin: 0; height: 34px; flex: none; }
+    button.nav { width: auto; }
+    .nav.sub { padding-left: 12px; }
     .content { padding: 16px; }
     .groups { grid-template-columns: minmax(0, 1fr); }
     .logo-text, .user-chip .name { display: none; }
@@ -561,13 +572,49 @@
     { id: "channel", group: "管理员", name: "渠道", icon: "server", render: pageChannel, admin: true },
     { id: "user", group: "管理员", name: "用户管理", icon: "users", render: pageUsers, admin: true },
     { id: "redemption", group: "管理员", name: "兑换码", icon: "ticket", render: pageRedemptions, admin: true },
-    { id: "setting", group: "管理员", name: "系统设置", icon: "settings", render: pageSettings, admin: true },
+    { id: "setting", group: "管理员", name: "系统设置", icon: "settings", admin: true, children: [
+      { id: "setting/basic", name: "基础设置", render: pageSettingBasic },
+      { id: "setting/login", name: "注册登录", render: pageSettingLogin },
+      { id: "setting/oauth", name: "第三方登录", render: pageSettingOauth },
+      { id: "setting/server", name: "服务器渠道", render: pageSettingServer },
+    ] },
   ];
   const isAdmin = () => me && me.role >= ROLE.ADMIN;
   const visiblePages = () => PAGES.filter((p) => !p.admin || isAdmin());
+  // 能打开的页面:带二级菜单的项本身不是页面,换成它的子页面
+  const leafPages = () => visiblePages().flatMap((p) => p.children || [p]);
   function currentPage() {
     const id = location.hash.slice(1);
-    return visiblePages().find((p) => p.id === id) || visiblePages()[0];
+    const parent = visiblePages().find((p) => p.children && p.id === id);
+    if (parent) {
+      history.replaceState(null, "", `#${parent.children[0].id}`); // 旧链接 #setting
+      return parent.children[0];
+    }
+    return leafPages().find((p) => p.id === id) || leafPages()[0];
+  }
+  const navOpen = {}; // 二级菜单是否展开;打开其中的页面时自动展开
+  function renderSide(page) {
+    const side = $("side");
+    side.replaceChildren();
+    let group = "";
+    for (const p of visiblePages()) {
+      if (p.group !== group) { group = p.group; side.append(h("div", { class: "side-group" }, group)); }
+      if (!p.children) {
+        side.append(h("a", { class: `nav${p === page ? " active" : ""}`, href: `#${p.id}` }, icon(p.icon), p.name));
+        continue;
+      }
+      const open = Boolean(navOpen[p.id]);
+      const caret = icon("chevron");
+      caret.classList.add("caret");
+      side.append(h("button", {
+        class: `nav nav-parent${open ? " open" : ""}${p.children.includes(page) ? " current" : ""}`, type: "button", "aria-expanded": String(open),
+        onclick: () => { navOpen[p.id] = !open; renderSide(page); },
+      }, icon(p.icon), p.name, caret));
+      if (open) for (const c of p.children) side.append(h("a", { class: `nav sub${c === page ? " active" : ""}`, href: `#${c.id}` }, c.name));
+    }
+    // 窄屏时菜单是一行横向滚动条,把当前项滚到可见处
+    const active = side.querySelector(".nav.active");
+    if (active) active.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
   let pageTimer = null;
   function route() {
@@ -575,13 +622,8 @@
     clearInterval(pageTimer);
     pageTimer = null;
     const page = currentPage();
-    const side = $("side");
-    side.replaceChildren();
-    let group = "";
-    for (const p of visiblePages()) {
-      if (p.group !== group) { group = p.group; side.append(h("div", { class: "side-group" }, group)); }
-      side.append(h("a", { class: `nav${p.id === page.id ? " active" : ""}`, href: `#${p.id}` }, icon(p.icon), p.name));
-    }
+    for (const p of visiblePages()) if (p.children && p.children.includes(page)) navOpen[p.id] = true;
+    renderSide(page);
     const root = h("section", { class: "page" });
     $("content").replaceChildren(root);
     $("content").scrollTop = 0;
@@ -1231,7 +1273,7 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
     const rows = data.items;
     card.replaceChildren(
       h("div", { class: "card-hd", style: "padding-bottom:14px" }, h("h3", {}, "服务器"),
-        h("div", { class: "toolbar" }, data.cf_ready ? null : h("span", { class: "t3" }, "先在「系统设置」填写 Cloudflare API Token"), add)),
+        h("div", { class: "toolbar" }, data.cf_ready ? null : h("span", { class: "t3" }, "先在「", h("a", { class: "text-link", href: "#setting/server" }, "系统设置 → 服务器渠道"), "」填写 Cloudflare API Token"), add)),
       table([
         { title: "位置", render: (r) => h("div", { class: "slot-badge" }, r.slot) },
         { title: "名称", render: (r) => r.name },
@@ -1444,63 +1486,74 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
       save));
   }
 
-  async function pageSettings(root) {
+  // 一张设置卡片:提交时保存 values() 返回的设置,成功后调用 done(保存后的全部设置)
+  function settingCard(title, fields, values, done) {
+    const save = h("button", { class: "btn primary", type: "submit" }, "保存");
+    return h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, title)),
+      h("form", { class: "card-bd form", onsubmit: async (e) => {
+        e.preventDefault();
+        save.disabled = true;
+        try {
+          const saved = await api("PUT", "/api/admin/option", values());
+          if (done) done(saved);
+          toast("已保存");
+        } catch (err) { toast(err.message, true); } finally { save.disabled = false; }
+      } }, ...fields, save));
+  }
+
+  async function pageSettingBasic(root) {
     const o = await api("GET", "/api/admin/option");
     const name = h("input", { class: "input", value: o.system_name, maxlength: 30 });
     const price = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.price_turnstile });
-    const gift = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.new_user_quota });
+    root.append(pageHeader("基础设置"), h("div", { class: "narrow" }, settingCard("基础",
+      [field("系统名称", name), field("求解价格", price, "积分 / 次，成功才扣")],
+      () => ({ system_name: name.value.trim(), price_turnstile: Number(price.value) }),
+      (saved) => {
+        sys.system_name = saved.system_name;
+        sys.price_turnstile = Number(saved.price_turnstile);
+        setSystemName(saved.system_name);
+      })));
+  }
+
+  async function pageSettingLogin(root) {
+    const o = await api("GET", "/api/admin/option");
     const REGISTER_METHODS = [["password", "密码"], ["github", "GitHub"], ["linuxdo", "LINUX DO"]];
     const reg = Object.fromEntries(REGISTER_METHODS.map(([key]) => [key, switchInput(o[`register_${key}_enabled`] === "true")]));
     const oauthOnlyOn = switchInput(o.oauth_only_enabled === "true");
-    const cfToken = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: o.cf_api_token_set ? "已设置，留空不修改" : "" });
-    const saveCf = h("button", { class: "btn primary", type: "submit" }, "保存");
-    const save = h("button", { class: "btn primary", type: "submit" }, "保存");
-    root.append(pageHeader("系统设置"), h("div", { class: "two" },
-      h("div", { class: "stack" }, h("div", { class: "card" },
-        h("div", { class: "card-hd" }, h("h3", {}, "基础")),
-        h("form", { class: "card-bd form", onsubmit: async (e) => {
-          e.preventDefault();
-          save.disabled = true;
-          try {
-            const saved = await api("PUT", "/api/admin/option", {
-              system_name: name.value.trim(), price_turnstile: Number(price.value),
-              new_user_quota: Number(gift.value), oauth_only_enabled: oauthOnlyOn.input.checked,
-              ...Object.fromEntries(REGISTER_METHODS.map(([key]) => [`register_${key}_enabled`, reg[key].input.checked])),
-            });
-            sys.system_name = saved.system_name;
-            sys.price_turnstile = Number(saved.price_turnstile);
-            sys.oauth_only = saved.oauth_only_enabled === "true" && Boolean(sys.github_oauth || sys.linuxdo_oauth);
-            sys.password_register = saved.register_password_enabled === "true" && !sys.oauth_only;
-            setSystemName(saved.system_name);
-            toast("已保存");
-          } catch (err) { toast(err.message, true); } finally { save.disabled = false; }
-        } },
-        field("系统名称", name),
-        field("求解价格", price, "积分 / 次，成功才扣"),
-        h("div", { class: "field" }, "开放注册",
-          h("div", { class: "toggles" }, REGISTER_METHODS.map(([key, label]) => h("span", {}, label, reg[key].el))),
-          h("span", { class: "hint" }, "关闭的方式不能注册新账号，已有账号仍可登录；GitHub 和 LINUX DO 还需在各自的登录设置中启用")),
-        h("div", { class: "field-row" }, h("span", {}, "仅第三方登录",
-          h("div", { class: "hint" }, "登录页只显示 GitHub / LINUX DO 按钮，关闭密码登录和密码注册；开启前先在个人设置中绑定")), oauthOnlyOn.el),
-        field("新用户赠送", gift, "积分"),
-        save)),
-        h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "服务器渠道")),
-          h("form", { class: "card-bd form", onsubmit: async (e) => {
-            e.preventDefault();
-            saveCf.disabled = true;
-            try {
-              const saved = await api("PUT", "/api/admin/option", { cf_api_token: cfToken.value });
-              cfToken.value = "";
-              cfToken.placeholder = saved.cf_api_token_set ? "已设置，留空不修改" : "";
-              toast("已保存");
-            } catch (err) { toast(err.message, true); } finally { saveCf.disabled = false; }
-          } },
-          field("Cloudflare API Token", cfToken,
-            "用于给服务器自动创建隧道和域名。在 dash.cloudflare.com → 我的个人资料 → API 令牌 创建，权限：账户 · Cloudflare Tunnel · 编辑;区域 · DNS · 编辑;区域 · 区域 · 读取(区域选 000.moe)"),
-          saveCf))),
-      h("div", { class: "stack" },
-        oauthCard(o, "github", "在 GitHub → Settings → Developer settings → OAuth Apps 创建应用，回调地址填上面这个；开放 GitHub 注册时首次登录自动创建账号"),
-        oauthCard(o, "linuxdo", "在 connect.linux.do → 应用接入 → 申请接入创建应用，回调地址填上面这个，最低等级在那里设置；开放 LINUX DO 注册时首次登录自动创建账号"))));
+    const gift = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.new_user_quota });
+    root.append(pageHeader("注册登录"), h("div", { class: "narrow" }, settingCard("注册与登录", [
+      h("div", { class: "field" }, "开放注册",
+        h("div", { class: "toggles" }, REGISTER_METHODS.map(([key, label]) => h("span", {}, label, reg[key].el))),
+        h("span", { class: "hint" }, "关闭的方式不能注册新账号，已有账号仍可登录；GitHub 和 LINUX DO 还需在「",
+          h("a", { class: "text-link", href: "#setting/oauth" }, "第三方登录"), "」中启用")),
+      h("div", { class: "field-row" }, h("span", {}, "仅第三方登录",
+        h("div", { class: "hint" }, "登录页只显示 GitHub / LINUX DO 按钮，关闭密码登录和密码注册；开启前先在个人设置中绑定")), oauthOnlyOn.el),
+      field("新用户赠送", gift, "积分，注册时发放"),
+    ], () => ({
+      new_user_quota: Number(gift.value), oauth_only_enabled: oauthOnlyOn.input.checked,
+      ...Object.fromEntries(REGISTER_METHODS.map(([key]) => [`register_${key}_enabled`, reg[key].input.checked])),
+    }), (saved) => {
+      sys.oauth_only = saved.oauth_only_enabled === "true" && Boolean(sys.github_oauth || sys.linuxdo_oauth);
+      sys.password_register = saved.register_password_enabled === "true" && !sys.oauth_only;
+    })));
+  }
+
+  async function pageSettingOauth(root) {
+    const o = await api("GET", "/api/admin/option");
+    root.append(pageHeader("第三方登录"), h("div", { class: "two" },
+      oauthCard(o, "github", "在 GitHub → Settings → Developer settings → OAuth Apps 创建应用，回调地址填上面这个；开放 GitHub 注册时首次登录自动创建账号"),
+      oauthCard(o, "linuxdo", "在 connect.linux.do → 应用接入 → 申请接入创建应用，回调地址填上面这个，最低等级在那里设置；开放 LINUX DO 注册时首次登录自动创建账号")));
+  }
+
+  async function pageSettingServer(root) {
+    const o = await api("GET", "/api/admin/option");
+    const placeholder = (set) => (set ? "已设置，留空不修改" : "");
+    const cfToken = h("input", { class: "input mono", type: "password", autocomplete: "new-password", placeholder: placeholder(o.cf_api_token_set) });
+    root.append(pageHeader("服务器渠道"), h("div", { class: "narrow" }, settingCard("Cloudflare",
+      [field("Cloudflare API Token", cfToken,
+        "用于给服务器自动创建隧道和域名。在 dash.cloudflare.com → 我的个人资料 → API 令牌 创建，权限：账户 · Cloudflare Tunnel · 编辑；区域 · DNS · 编辑；区域 · 区域 · 读取(区域选 000.moe)")],
+      () => ({ cf_api_token: cfToken.value }),
+      (saved) => { cfToken.value = ""; cfToken.placeholder = placeholder(saved.cf_api_token_set); })));
   }
 
   // ---------------------------------------------------------------- 启动

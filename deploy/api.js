@@ -697,7 +697,7 @@ async function createChannel(c) {
   check(name.length >= 1 && name.length <= 30, "名称为 1–30 个字符");
   const concurrency = channelConcurrency(input.concurrency);
   const cfg = cloudflareConfig(c, await getOptions(c.env));
-  check(cfg.token && cfg.accountId && cfg.zone, "请先在「系统设置」填写 Cloudflare API Token");
+  check(cfg.token && cfg.accountId && cfg.zone, "请先在「系统设置 → 服务器渠道」填写 Cloudflare API Token");
   const { results } = await c.env.DB.prepare("SELECT slot FROM channels").all();
   const used = new Set(results.map((r) => r.slot));
   const slot = [...SERVER_SLOTS].find((x) => !used.has(x));

@@ -95,8 +95,9 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 - 调用方文档在控制台「使用文档」页,未登录也可访问:`https://solver.000.moe/#docs`。
 - 用户令牌即 `clientKey` / `X-API-Key`:创建任务时预扣积分,求解成功才结算,失败或 10 分钟未取结果自动退还;`getBalance` 返回账户余额。
 - 现有的 API Key 照常可用且不计费。
-- 充值方式为管理员生成的兑换码;价格、注册开关(密码、GitHub、LINUX DO 分别开关,例如只开放 LINUX DO 注册)、新用户赠送在「系统设置」中修改。
-- 支持 GitHub 与 LINUX DO 登录:在「系统设置」填写对应应用的 Client ID / Secret;开放该方式注册时首次登录自动创建账号,
+- 充值方式为管理员生成的兑换码;价格在「系统设置 → 基础设置」,注册开关(密码、GitHub、LINUX DO 分别开关,例如只开放 LINUX DO 注册)、
+  新用户赠送在「系统设置 → 注册登录」中修改。
+- 支持 GitHub 与 LINUX DO 登录:在「系统设置 → 第三方登录」填写对应应用的 Client ID / Secret;开放该方式注册时首次登录自动创建账号,
   已有账号可在「个人设置」中绑定。可开启「仅第三方登录」:登录页只显示 GitHub / LINUX DO 按钮,密码登录与密码注册关闭
   (两种都未启用时自动退回密码登录;保存会导致自己无法登录的设置时会被拒绝)。
 - worker 的 `GET /admin/stats`(需根密钥)提供渠道页的数据,只保存在进程内,worker 轮换后清零。
@@ -104,7 +105,7 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 ### 自有服务器渠道
 
 除了 CNB 上自动扩缩的 worker,任意 Linux 服务器(x86_64 / arm64,建议 4 核 8GB 以上)都可以作为渠道接入,
-与 CNB worker 一起分流和计费。控制台「渠道」页点「添加服务器」(需先在「系统设置」填写 Cloudflare API Token),
+与 CNB worker 一起分流和计费。控制台「渠道」页点「添加服务器」(需先在「系统设置 → 服务器渠道」填写 Cloudflare API Token),
 会自动创建 Cloudflare 隧道和 `solver-<位置>.000.moe` 域名,并给出安装命令,在服务器上以 root 执行:
 
 ```bash
