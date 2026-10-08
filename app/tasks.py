@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .backend import BackendError
+from .models import SITEKEY_HINT, SITEKEY_RE
 from .turnstile import TurnstileSolver
 
 log = logging.getLogger("gateway.tasks")
@@ -92,6 +93,8 @@ def parse_task(task: Any) -> TaskParams:
         raise TaskError("ERROR_INVALID_TASK_DATA", "websiteURL 缺失或不是 http(s) 地址")
     if not sitekey:
         raise TaskError("ERROR_INVALID_TASK_DATA", "websiteKey 缺失")
+    if not SITEKEY_RE.match(sitekey):
+        raise TaskError("ERROR_INVALID_TASK_DATA", SITEKEY_HINT)
     metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
     action = _first(task.get("action"), task.get("pageAction"), metadata.get("action"))
     cdata = _first(task.get("cdata"), task.get("data"), metadata.get("cdata"))

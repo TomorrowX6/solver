@@ -113,6 +113,12 @@ _PAGE_TEMPLATE = (
 
 _WRITE_JS = "document.open(); document.write(arguments[0]); document.close();"
 
+# Cloudflare 验证页(5 秒盾)会定义 _cf_chl_opt;普通页面上的 Bot Management 脚本不会。
+# 组件要在目标域名的页面上渲染,验证页的 CSP 不允许加载 api.js,只能等它通过
+_CHALLENGE_JS = "return typeof window._cf_chl_opt !== 'undefined' || !!document.getElementById('challenge-error-text');"
+# 验证页最多等这么久:浏览器常能自动通过非交互式验证,之后页面变成目标页面;交互式验证不会自己通过
+CHALLENGE_WAIT = 12.0
+
 # 读取页面状态。token 除了回调,还从 turnstile.getResponse() 与组件内的隐藏输入框读取(回调偶尔没有触发),
 # tokenSource 记录来源,便于判断是否漏收
 _POLL_JS = r"""
@@ -331,9 +337,9 @@ class TurnstileSolver:
                     reason = re.sub(r"(组件卡住)\(.*?\)", r"\1", f"{e.code}: {e.message}")[:80]
                     self.attempt_errors[reason] = self.attempt_errors.get(reason, 0) + 1
                     log.warning("attempt %d failed for %s [%s]: %s", attempts, url, e.code, e.message)
-                    # 配置错误是确定性的,不重试;页面加载不了组件可能是网络暂时不通(重试一次),
+                    # 配置错误、目标页面在验证页之后是确定性的,不重试;页面加载不了组件可能是网络暂时不通(重试一次),
                     # 也可能是 CSP 拦截(重试也没用),所以最多重试一次
-                    if e.code == "turnstile_error" or (e.code == "page_error" and attempts >= 2):
+                    if e.code in ("turnstile_error", "challenge_page") or (e.code == "page_error" and attempts >= 2):
                         break
                     continue
                 self.solved += 1
@@ -370,6 +376,10 @@ class TurnstileSolver:
                     error = self._open(driver, page, attempt_id)
                 if error:
                     last_error = f"navigation: {error}"
+                    continue
+                if self._behind_challenge(driver, min(deadline, time.monotonic() + CHALLENGE_WAIT)):
+                    log.info("attempt %s %s stayed on a Cloudflare challenge page", attempt_id, page)
+                    last_error = "challenge"
                     continue
                 if driver.execute_script("return location.hostname") != target_host:
                     last_error = "redirected_to_other_host"
@@ -415,12 +425,28 @@ class TurnstileSolver:
             if last_error.startswith("timeout"):
                 reason = last_error.partition(":")[2] or "未知原因"
                 raise SolveFailed("timeout", f"未能在限定时间内拿到 token({reason})")
+            if last_error == "challenge":
+                raise SolveFailed("challenge_page", "目标站点的页面在 Cloudflare 验证页(5 秒盾)之后，无法在其域名上渲染 Turnstile 组件")
             raise SolveFailed("page_error", f"无法在目标域名上加载 Turnstile 组件({last_error})")
         finally:
             try:
                 driver.quit()
             except Exception:  # noqa: BLE001
                 pass
+
+    @staticmethod
+    def _behind_challenge(driver, until: float) -> bool:
+        """页面是 Cloudflare 验证页,并且到 until 仍未通过时返回 True。"""
+        while True:
+            try:
+                challenged = bool(driver.execute_script(_CHALLENGE_JS))
+            except Exception:  # noqa: BLE001 - 验证通过后页面跳转,脚本可能在导航中途执行失败
+                challenged = True
+            if not challenged:
+                return False
+            if time.monotonic() >= until:
+                return True
+            time.sleep(0.5)
 
     @staticmethod
     def _open(driver, page: str, attempt_id: str) -> str | None:

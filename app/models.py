@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 # 这些字段会被写进注入页面的 JS 中,限制字符集
 _SAFE = r"^[A-Za-z0-9_\-]+$"
+# Turnstile sitekey:正式的以 0x 开头,Cloudflare 的测试 sitekey 以 1x / 2x / 3x 开头。
+# 提交时就拒绝明显不对的值(例如把 API 令牌填成 sitekey),不占用浏览器
+SITEKEY_RE = re.compile(r"^[0-3]x[0-9A-Za-z_-]{8,80}$")
+SITEKEY_HINT = "websiteKey 格式不对：应为 0x 开头的 Turnstile sitekey(页面中 data-sitekey 的值)"
 
 
 class SolveRequest(BaseModel):
@@ -14,6 +19,13 @@ class SolveRequest(BaseModel):
     action: str | None = Field(default=None, max_length=32, pattern=_SAFE)
     cdata: str | None = Field(default=None, max_length=255, pattern=_SAFE)
     timeout: float | None = Field(default=None, ge=5, description="总超时(秒),缺省使用服务端默认值")
+
+    @field_validator("sitekey")
+    @classmethod
+    def _sitekey_format(cls, value: str) -> str:
+        if not SITEKEY_RE.match(value):
+            raise ValueError(SITEKEY_HINT.replace("websiteKey", "sitekey"))
+        return value
 
     @model_validator(mode="before")
     @classmethod

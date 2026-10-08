@@ -32,6 +32,17 @@ const TASK_RETRY_CODES = new Set(["ERROR_NO_SLOT_AVAILABLE", "ERROR_SERVICE_UNAV
 // 还没重装升级的服务器渠道也就不会再接受代理
 const PROXY_TASK_TYPES = new Set(["turnstiletask", "antiturnstiletask"]);
 
+// 明显填错的参数直接拒绝,不占用 worker(网关同样检查 sitekey 格式,这里让未升级的服务器渠道也一样):
+// sitekey 正式的以 0x 开头,Cloudflare 的测试 sitekey 以 1x / 2x / 3x 开头;网址不能是本服务自己
+const SITEKEY_RE = /^[0-3]x[0-9A-Za-z_-]{8,80}$/;
+function badTarget(rt, websiteURL, sitekey) {
+  if (typeof sitekey === "string" && sitekey && !SITEKEY_RE.test(sitekey.trim())) {
+    return "websiteKey 格式不对：应为 0x 开头的 Turnstile sitekey(页面中 data-sitekey 的值)";
+  }
+  if (hostname(websiteURL) === rt.url.hostname) return "websiteURL 填成了本服务的地址：应为组件所在的目标页面";
+  return null;
+}
+
 // 隧道没有连接器(位置未启用或 worker 已下线):30 秒内排到最后再试,避免每个请求都先撞一次
 const OFFLINE_STATUS = new Set([502, 521, 522, 523, 530]);
 const offlineUntil = new Map();
@@ -239,6 +250,9 @@ function bearerKey(request) {
 async function billedCreateTask(rt, payload, auth, root) {
   const type = String((payload.task && payload.task.type) || "");
   if (PROXY_TASK_TYPES.has(type.toLowerCase())) return taskError("ERROR_TASK_NOT_SUPPORTED", `不支持带代理的 ${type}，请使用 TurnstileTaskProxyless`);
+  const task = payload.task || {};
+  const bad = badTarget(rt, task.websiteURL || task.websiteUrl, task.websiteKey);
+  if (bad) return taskError("ERROR_INVALID_TASK_DATA", bad);
   const cost = intOption(await getOptions(rt.env), "price_turnstile");
   const denied = await reserve(rt.env, auth, cost);
   if (denied) return taskError("ERROR_ZERO_BALANCE", denied);
@@ -348,6 +362,8 @@ async function relayBilled(rt, root, body) {
     const payload = parseJson(body);
     if (!payload) return error(400, "invalid_request", "请求体不是合法的 JSON");
     if (payload.proxy != null && payload.proxy !== "") return error(422, "invalid_request", "不支持 proxy，Turnstile 由服务端直接求解，请去掉该字段");
+    const bad = badTarget(rt, payload.url, payload.sitekey);
+    if (bad) return error(422, "invalid_request", bad.replace("websiteKey", "sitekey").replace("websiteURL", "url"));
     return billedSync(rt, body, auth, root, {
       cost: intOption(await getOptions(env), "price_turnstile"),
       content: "Turnstile(同步)",

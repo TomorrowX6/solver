@@ -69,10 +69,10 @@ token 一次性使用,建议拿到后 60 秒内提交;结果在服务端保留 3
 |---|---|
 | `ERROR_KEY_DOES_NOT_EXIST` | clientKey 错误 |
 | `ERROR_TASK_NOT_SUPPORTED` | 不支持的任务类型(包括带代理的 `TurnstileTask`) |
-| `ERROR_INVALID_TASK_DATA` | 缺少 task、websiteURL / websiteKey,或 websiteURL 不是 http(s) 地址 |
+| `ERROR_INVALID_TASK_DATA` | 缺少 task、websiteURL / websiteKey,websiteURL 不是 http(s) 地址,或 websiteKey 不是 Turnstile sitekey(`0x` 开头,测试 sitekey 为 `1x`–`3x`) |
 | `ERROR_NO_SLOT_AVAILABLE` | 当前没有空闲名额,稍后重试 |
 | `ERROR_TASKID_INVALID` | taskId 不存在、已过期,或创建它的 worker 已重启或下线(重新创建即可) |
-| `ERROR_CAPTCHA_UNSOLVABLE` | 识别失败:sitekey 与域名不匹配、超时等,详见 errorDescription |
+| `ERROR_CAPTCHA_UNSOLVABLE` | 识别失败:sitekey 与域名不匹配、目标页面在 Cloudflare 验证页(5 秒盾)之后、超时等,详见 errorDescription |
 | `ERROR_SERVICE_UNAVALIABLE` | 求解器暂不可用 |
 | `ERROR_ZERO_BALANCE` | 积分或令牌额度不足(使用用户令牌时) |
 
@@ -84,7 +84,7 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 # → {"token": "…", "elapsed": 9.7, "attempts": 1, "user_agent": "…"}
 ```
 
-出错时为 `{"status": "error", "code": "…", "message": "…"}`:401 `unauthorized`、422 `turnstile_error`(sitekey 与域名不匹配等)、
+出错时为 `{"status": "error", "code": "…", "message": "…"}`:401 `unauthorized`、422 `turnstile_error`(sitekey 与域名不匹配等)/ `challenge_page`(目标页面在验证页之后)、
 429 `busy`、500 `timeout` / `page_error`、503 `solver_unavailable`。参数校验失败(包括传入不再支持的 `proxy`)时为 422。
 
 ### 控制台与积分
@@ -138,6 +138,8 @@ FlareSolverr v3.5.2(打与镜像相同的补丁)和 cloudflared,装到 `/opt/tur
 - 每次求解启动一个全新的浏览器;单次尝试超过 `TS_ATTEMPT_TIMEOUT`(默认 35 秒)或判定卡住时,换新浏览器重试,
   直到总超时(任务为 `TS_MAX_TIMEOUT`,`/solve` 可用 `timeout` 指定)。
   sitekey / 域名配置错误不重试;页面无法加载组件(网络超时或 CSP 拦截)最多重试一次。
+- 打开的页面是 Cloudflare 验证页(5 秒盾,页面定义了 `_cf_chl_opt`)时最多等 12 秒让浏览器自动通过,
+  仍未通过就换后备页面;都在验证页之后时以 `challenge_page` 失败且不重试(组件无法在这类站点的域名上渲染)。
 - 点击由组件 iframe 发给页面的 postMessage 事件驱动:收到 `interactiveBegin`(复选框出现)后停顿 1~2 秒用鼠标点击;
   点击后 6 秒左右仍未进入验证(没有 `interactiveEnd`)再点,同一个复选框最多点 3 次。复选框出现前点击无效,所以不会提前点。
 - 挑战在复选框出现前 `TS_STALL_SECONDS`(默认 20)秒没有新事件时放弃这个浏览器,换新浏览器重试;组件报错(如 600010)时自动 `turnstile.reset()`。
