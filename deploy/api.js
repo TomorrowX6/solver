@@ -30,8 +30,32 @@ function publicUser(u) {
     id: u.id, username: u.username, role: u.role, status: u.status, quota: u.quota, used_quota: u.used_quota,
     request_count: u.request_count, created_at: u.created_at, last_login_at: u.last_login_at,
     github_login: u.github_login || null, linuxdo_login: u.linuxdo_login || null, has_password: Boolean(u.password_hash),
+    checkin_today: u.checkin_day === chinaDay(),
   };
 }
+
+// 北京时间的天数(从 1970-01-01 起算),每日签到按它判断是不是同一天
+const chinaDay = (t = now()) => Math.floor((t + 8 * 3600) / 86400);
+
+// 每日签到:当天第一次登录或打开控制台时发放 checkin_quota 积分,返回本次发放的积分(今天已签到或未开启时为 0)。
+// 条件更新保证同一天只发放一次,即使同时有多个请求
+async function dailyCheckin(env, user) {
+  const day = chinaDay();
+  if (user.checkin_day === day || user.status !== 1) return 0;
+  const amount = intOption(await getOptions(env), "checkin_quota");
+  if (amount <= 0) return 0;
+  const r = await env.DB.prepare("UPDATE users SET quota = quota + ?, checkin_day = ? WHERE id = ? AND checkin_day < ?")
+    .bind(amount, day, user.id, day).run();
+  if (!r.meta.changes) return 0;
+  user.quota += amount;
+  user.checkin_day = day;
+  await addLog(env, { userId: user.id, username: user.username, type: LOG.SYSTEM, content: `每日签到赠送 ${amount} 积分`, quota: amount });
+  return amount;
+}
+const withCheckin = async (env, user) => {
+  const checkin = await dailyCheckin(env, user);
+  return { ...publicUser(user), checkin };
+};
 
 function page(url) {
   const p = Math.max(1, toInt(url.searchParams.get("p"), 1));
@@ -92,6 +116,7 @@ async function status(c) {
     password_register: options.register_password_enabled === "true" && !oauthOnly(options),
     oauth_only: oauthOnly(options),
     price_turnstile: intOption(options, "price_turnstile"),
+    checkin_quota: intOption(options, "checkin_quota"),
     github_oauth: OAUTH.github.enabled(options),
     linuxdo_oauth: OAUTH.linuxdo.enabled(options),
   });
@@ -132,7 +157,7 @@ async function login(c) {
   if (!user.password_hash) return fail(`该账号使用 ${oauthName(user)} 登录`);
   if (!(await verifyPassword(password, user.password_hash))) return fail("用户名或密码错误");
   if (user.status !== 1) return fail("账号已禁用");
-  return ok(publicUser(user), await startSession(c.env, user));
+  return ok(await withCheckin(c.env, user), await startSession(c.env, user));
 }
 
 async function register(c) {
@@ -147,7 +172,7 @@ async function register(c) {
     "INSERT INTO users (username, password_hash, role, status, quota, created_at) VALUES (?, ?, ?, 1, ?, ?) RETURNING *",
   ).bind(username, await hashPassword(password), ROLE.USER, quota, now()).first();
   await addLog(c.env, { userId: user.id, username, type: LOG.SYSTEM, content: quota ? `注册赠送 ${quota} 积分` : "注册", quota });
-  return ok(publicUser(user), await startSession(c.env, user));
+  return ok(await withCheckin(c.env, user), await startSession(c.env, user));
 }
 
 async function logout(c) {
@@ -335,7 +360,7 @@ const oauthCallback = (key) => async (c) => {
 
 // ------------------------------------------------------------------ 个人
 async function self(c) {
-  return ok(publicUser(c.user));
+  return ok(await withCheckin(c.env, c.user));
 }
 
 async function changePassword(c) {

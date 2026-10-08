@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Turnstile Solver</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%233bb346'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' fill='none' stroke='%23fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #f7f8fa; --card: #ffffff; --border: rgba(28, 31, 35, .08);
@@ -108,7 +109,9 @@
     padding: 0 16px; background: var(--card); border-bottom: 1px solid var(--border);
   }
   .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; white-space: nowrap; min-width: 0; }
-  .logo-mark { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--primary); color: #fff; flex: none; }
+  /* 标志:绿底白勾(与验证通过时的 Turnstile 一致),不随主题变色 */
+  .logo-mark { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: #3bb346; color: #fff; flex: none; }
+  .logo-mark svg.i { stroke-width: 3; }
   .hdr-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .user-chip { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 4px; height: 32px; border-radius: 16px; background: var(--fill); }
   .avatar-sm { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--primary); color: #fff; font-size: 12px; font-weight: 700; text-transform: uppercase; }
@@ -277,7 +280,7 @@
 
 <div class="auth-wrap" id="auth" hidden>
   <div class="card auth">
-    <div class="logo"><span class="logo-mark" data-icon="shield"></span><span class="sys-name">Turnstile Solver</span></div>
+    <div class="logo"><span class="logo-mark" data-icon="tick"></span><span class="sys-name">Turnstile Solver</span></div>
     <div class="sub-title" id="auth-title">登录</div>
     <form class="form" id="auth-form">
       <input class="input" id="a-user" autocomplete="username" placeholder="用户名" required>
@@ -295,7 +298,7 @@
 
 <div id="pub" hidden>
   <header class="hdr">
-    <div class="logo"><span class="logo-mark" data-icon="shield"></span><span class="sys-name">Turnstile Solver</span></div>
+    <div class="logo"><span class="logo-mark" data-icon="tick"></span><span class="sys-name">Turnstile Solver</span></div>
     <a class="btn primary" href="#">登录</a>
   </header>
   <main class="pub-main" id="pub-content"></main>
@@ -303,7 +306,7 @@
 
 <div id="app" hidden>
   <header class="hdr">
-    <div class="logo"><span class="logo-mark" data-icon="shield"></span><span class="logo-text sys-name">Turnstile Solver</span></div>
+    <div class="logo"><span class="logo-mark" data-icon="tick"></span><span class="logo-text sys-name">Turnstile Solver</span></div>
     <div class="hdr-right">
       <button class="btn icon" id="theme" type="button" title="主题"></button>
       <div class="user-chip"><span class="avatar-sm" id="me-avatar"></span><span class="name" id="me-name"></span></div>
@@ -355,7 +358,7 @@
   }
   // 图标路径均为常量
   const ICONS = {
-    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+    tick: '<path d="M20 6 9 17l-5-5"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
     key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
     list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
@@ -545,6 +548,7 @@
     $("a-submit").disabled = true;
     try {
       me = await api("POST", path, payload);
+      noteCheckin(me);
       $("a-pass").value = "";
       $("a-key").value = "";
       if (sys) sys.setup_required = false;
@@ -636,6 +640,16 @@
   });
   function every(seconds, fn) {
     pageTimer = setInterval(() => { if (!document.hidden) fn().catch(() => {}); }, seconds * 1000);
+  }
+
+  // 当天第一次登录或打开控制台时,服务端发放签到积分并在响应里带上 checkin
+  function noteCheckin(u) {
+    if (u && u.checkin > 0) setTimeout(() => toast(`每日签到 +${num(u.checkin)} 积分`), 300);
+  }
+  async function loadMe() {
+    const u = await api("GET", "/api/user/self");
+    noteCheckin(u);
+    return u;
   }
 
   function enterApp() {
@@ -902,18 +916,21 @@
     const balance = h("div", { class: "big-num" }, "—");
     const used = h("span");
     const count = h("span");
+    const checkin = h("div", { class: "t3", style: "margin-top:4px" });
     const code = h("input", { class: "input", placeholder: "兑换码", autocomplete: "off" });
     const redeem = h("button", { class: "btn primary", type: "submit" }, "兑换");
     const load = async () => {
-      me = await api("GET", "/api/user/self");
+      me = await loadMe();
       balance.textContent = num(me.quota);
       used.textContent = num(me.used_quota);
       count.textContent = num(me.request_count);
+      checkin.hidden = !(sys.checkin_quota > 0);
+      checkin.textContent = `每日签到 ${num(sys.checkin_quota)} 积分，每天首次打开控制台自动领取${me.checkin_today ? "，今日已领取" : ""}`;
     };
     root.append(pageHeader("钱包"), h("div", { class: "two" },
       h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "当前余额")),
         h("div", { class: "card-bd" }, balance, h("div", { class: "t2", style: "margin-top:8px" }, "历史消耗 ", used, " · 请求 ", count),
-          h("div", { class: "t3", style: "margin-top:4px" }, `求解 ${sys.price_turnstile} 积分 / 次，失败不扣`))),
+          h("div", { class: "t3", style: "margin-top:4px" }, `求解 ${sys.price_turnstile} 积分 / 次，失败不扣`), checkin)),
       h("div", { class: "card" }, h("div", { class: "card-hd" }, h("h3", {}, "兑换码充值")),
         h("form", { class: "card-bd form", onsubmit: async (e) => {
           e.preventDefault();
@@ -1177,7 +1194,7 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
 
   // ---------------------------------------------------------------- 个人设置
   async function pagePersonal(root) {
-    me = await api("GET", "/api/user/self");
+    me = await loadMe();
     const [roleName, roleColor] = ROLE_TAG[me.role] || ["用户", ""];
     const oldPass = h("input", { class: "input", type: "password", autocomplete: "current-password", required: me.has_password });
     const newPass = h("input", { class: "input", type: "password", autocomplete: "new-password", minlength: 8, required: true });
@@ -1521,6 +1538,7 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
     const reg = Object.fromEntries(REGISTER_METHODS.map(([key]) => [key, switchInput(o[`register_${key}_enabled`] === "true")]));
     const oauthOnlyOn = switchInput(o.oauth_only_enabled === "true");
     const gift = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.new_user_quota });
+    const checkin = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.checkin_quota });
     root.append(pageHeader("注册登录"), h("div", { class: "narrow" }, settingCard("注册与登录", [
       h("div", { class: "field" }, "开放注册",
         h("div", { class: "toggles" }, REGISTER_METHODS.map(([key, label]) => h("span", {}, label, reg[key].el))),
@@ -1529,12 +1547,14 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
       h("div", { class: "field-row" }, h("span", {}, "仅第三方登录",
         h("div", { class: "hint" }, "登录页只显示 GitHub / LINUX DO 按钮，关闭密码登录和密码注册；开启前先在个人设置中绑定")), oauthOnlyOn.el),
       field("新用户赠送", gift, "积分，注册时发放"),
+      field("每日签到", checkin, "积分，每天(北京时间)第一次登录或打开控制台时自动发放；0 表示关闭"),
     ], () => ({
-      new_user_quota: Number(gift.value), oauth_only_enabled: oauthOnlyOn.input.checked,
+      new_user_quota: Number(gift.value), checkin_quota: Number(checkin.value), oauth_only_enabled: oauthOnlyOn.input.checked,
       ...Object.fromEntries(REGISTER_METHODS.map(([key]) => [`register_${key}_enabled`, reg[key].input.checked])),
     }), (saved) => {
       sys.oauth_only = saved.oauth_only_enabled === "true" && Boolean(sys.github_oauth || sys.linuxdo_oauth);
       sys.password_register = saved.register_password_enabled === "true" && !sys.oauth_only;
+      sys.checkin_quota = Number(saved.checkin_quota);
     })));
   }
 
@@ -1575,7 +1595,7 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
     }
     if (sys.setup_required) return showAuth();
     try {
-      me = await api("GET", "/api/user/self");
+      me = await loadMe();
       enterApp();
     } catch {
       if (location.hash === "#docs") showPublicDocs();
