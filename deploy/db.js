@@ -59,6 +59,7 @@ export const OPTION_DEFAULTS = {
   register_linuxdo_enabled: "false",
   oauth_only_enabled: "false", // 仅第三方登录:关闭密码登录与密码注册,登录页只显示 GitHub / LINUX DO
   new_user_quota: "0",
+  max_users: "0", // 注册人数上限:用户总数(含管理员)达到后不能再注册,0 表示不限;管理员手动添加不受限制
   checkin_quota: "0", // 每日签到:每天首次登录或打开控制台时发放的积分,0 表示关闭
   solver_key: "", // worker 的 API Key(初始化时校验后保存;也可用 Worker 密钥 SOLVER_KEY 提供)
   github_oauth_enabled: "false",

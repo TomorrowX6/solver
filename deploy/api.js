@@ -34,6 +34,11 @@ function publicUser(u) {
   };
 }
 
+// 注册人数上限:插入新用户时附加这个条件(参数依次为 max_users 两次),达到上限时不插入。
+// D1 的写入是串行的,所以同时注册的请求也不会超过上限
+const UNDER_USER_LIMIT = "WHERE ? = 0 OR (SELECT COUNT(*) FROM users) < ?";
+const REGISTER_FULL = "注册人数已满";
+
 // 北京时间的天数(从 1970-01-01 起算),每日签到按它判断是不是同一天
 const chinaDay = (t = now()) => Math.floor((t + 8 * 3600) / 86400);
 
@@ -110,10 +115,13 @@ function validCredentials(username, password) {
 async function status(c) {
   const options = await getOptions(c.env);
   const users = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users").first();
+  const maxUsers = intOption(options, "max_users");
+  const registerFull = maxUsers > 0 && users.n >= maxUsers;
   return ok({
     system_name: options.system_name,
     setup_required: users.n === 0,
-    password_register: options.register_password_enabled === "true" && !oauthOnly(options),
+    password_register: options.register_password_enabled === "true" && !oauthOnly(options) && !registerFull,
+    register_full: registerFull,
     oauth_only: oauthOnly(options),
     price_turnstile: intOption(options, "price_turnstile"),
     checkin_quota: intOption(options, "checkin_quota"),
@@ -168,9 +176,11 @@ async function register(c) {
   const taken = await c.env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(username).first();
   check(!taken, "用户名已存在");
   const quota = intOption(options, "new_user_quota");
+  const maxUsers = intOption(options, "max_users");
   const user = await c.env.DB.prepare(
-    "INSERT INTO users (username, password_hash, role, status, quota, created_at) VALUES (?, ?, ?, 1, ?, ?) RETURNING *",
-  ).bind(username, await hashPassword(password), ROLE.USER, quota, now()).first();
+    `INSERT INTO users (username, password_hash, role, status, quota, created_at) SELECT ?, ?, ?, 1, ?, ? ${UNDER_USER_LIMIT} RETURNING *`,
+  ).bind(username, await hashPassword(password), ROLE.USER, quota, now(), maxUsers, maxUsers).first();
+  if (!user) return fail(REGISTER_FULL);
   await addLog(c.env, { userId: user.id, username, type: LOG.SYSTEM, content: quota ? `注册赠送 ${quota} 积分` : "注册", quota });
   return ok(await withCheckin(c.env, user), await startSession(c.env, user));
 }
@@ -342,10 +352,12 @@ const oauthCallback = (key) => async (c) => {
   if (!user) {
     if (options[`register_${key}_enabled`] !== "true") return oauthError(`该 ${p.name} 账号未绑定用户：请用密码登录后在个人设置中绑定`);
     const quota = intOption(options, "new_user_quota");
+    const maxUsers = intOption(options, "max_users");
     user = await c.env.DB.prepare(
       `INSERT INTO users (username, password_hash, role, status, quota, created_at, ${idCol}, ${loginCol})
-       VALUES (?, '', ?, 1, ?, ?, ?, ?) RETURNING *`,
-    ).bind(await uniqueUsername(c.env, account.login, p.prefix), ROLE.USER, quota, now(), account.id, account.login).first();
+       SELECT ?, '', ?, 1, ?, ?, ?, ? ${UNDER_USER_LIMIT} RETURNING *`,
+    ).bind(await uniqueUsername(c.env, account.login, p.prefix), ROLE.USER, quota, now(), account.id, account.login, maxUsers, maxUsers).first();
+    if (!user) return oauthError(`${REGISTER_FULL}，无法用 ${p.name} 注册新账号`);
     await addLog(c.env, {
       userId: user.id, username: user.username, type: LOG.SYSTEM, quota,
       content: quota ? `${p.name} 注册赠送 ${quota} 积分` : `${p.name} 注册`,
@@ -647,6 +659,7 @@ async function getOptionList(c) {
   visible.github_client_secret_set = Boolean(options.github_client_secret);
   visible.linuxdo_client_secret_set = Boolean(options.linuxdo_client_secret);
   visible.cf_api_token_set = Boolean(options.cf_api_token);
+  visible.user_count = (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users").first()).n;
   return ok(visible);
 }
 

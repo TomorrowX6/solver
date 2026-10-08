@@ -1539,17 +1539,20 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
     const oauthOnlyOn = switchInput(o.oauth_only_enabled === "true");
     const gift = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.new_user_quota });
     const checkin = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.checkin_quota });
+    const maxUsers = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.max_users });
     root.append(pageHeader("注册登录"), h("div", { class: "narrow" }, settingCard("注册与登录", [
       h("div", { class: "field" }, "开放注册",
         h("div", { class: "toggles" }, REGISTER_METHODS.map(([key, label]) => h("span", {}, label, reg[key].el))),
         h("span", { class: "hint" }, "关闭的方式不能注册新账号，已有账号仍可登录；GitHub 和 LINUX DO 还需在「",
           h("a", { class: "text-link", href: "#setting/oauth" }, "第三方登录"), "」中启用")),
+      field("注册人数上限", maxUsers, `所有账号合计(含管理员)，当前 ${num(o.user_count)} 人；达到后不能再注册新账号，已有账号和管理员添加的用户不受影响；0 表示不限`),
       h("div", { class: "field-row" }, h("span", {}, "仅第三方登录",
         h("div", { class: "hint" }, "登录页只显示 GitHub / LINUX DO 按钮，关闭密码登录和密码注册；开启前先在个人设置中绑定")), oauthOnlyOn.el),
       field("新用户赠送", gift, "积分，注册时发放"),
       field("每日签到", checkin, "积分，每天(北京时间)第一次登录或打开控制台时自动发放；0 表示关闭"),
     ], () => ({
-      new_user_quota: Number(gift.value), checkin_quota: Number(checkin.value), oauth_only_enabled: oauthOnlyOn.input.checked,
+      new_user_quota: Number(gift.value), checkin_quota: Number(checkin.value), max_users: Number(maxUsers.value),
+      oauth_only_enabled: oauthOnlyOn.input.checked,
       ...Object.fromEntries(REGISTER_METHODS.map(([key]) => [`register_${key}_enabled`, reg[key].input.checked])),
     }), (saved) => {
       sys.oauth_only = saved.oauth_only_enabled === "true" && Boolean(sys.github_oauth || sys.linuxdo_oauth);
