@@ -34,6 +34,8 @@ log = logging.getLogger("gateway.api")
 _ERROR_STATUS = {
     "unauthorized": 401,
     "turnstile_error": 422,
+    # 目标站点的页面都在 Cloudflare 验证页之后,无法渲染组件
+    "challenge_page": 422,
     "busy": 429,
     # 求解器不可用,请求尚未执行:上游可以改投其他副本
     "solver_unavailable": 503,
