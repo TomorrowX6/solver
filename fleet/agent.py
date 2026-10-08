@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import signal
 import socket
@@ -72,6 +73,19 @@ def http_ok(url: str, timeout: float = 3) -> bool:
 def task_prefix(slot: str, worker_id: str) -> str:
     index = SLOT_ORDER.index(slot) if slot in SLOT_ORDER else 0
     return f"{index:x}" + hashlib.sha1(worker_id.encode()).hexdigest()[:7]
+
+
+def tunnel_protocol(log_path: Path) -> str | None:
+    """cloudflared 最近一次注册连接用的协议(quic / http2)。--protocol auto 时 QUIC 连不上会退回 http2。"""
+    try:
+        with open(log_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 65536))
+            text = f.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    found = re.findall(r"Registered tunnel connection.*?protocol=(\w+)", text)
+    return found[-1] if found else None
 
 
 def http_json(url: str, timeout: float = 5) -> dict | None:
@@ -155,6 +169,9 @@ class Agent:
         self.tunnel_down_since: float | None = None
         self.tunnel_kicked_at = float("-inf")
         self.tunnel_restarts = 0
+        # 隧道从有连接变成一个连接都没有的次数,用来比较不同隧道协议的稳定性
+        self.tunnel_drops = 0
+        self.tunnel_was_ok = False
 
         # 业务进程都不需要隧道令牌
         base_env = {k: v for k, v in os.environ.items() if not k.startswith("TUNNEL_TOKEN")}
@@ -271,6 +288,7 @@ class Agent:
             self.drain_step(health)
         tunnel_ok = self.tunnel is None or http_ok(f"http://{METRICS}/ready")
         self.tunnel_watchdog(tunnel_ok)
+        self.track_tunnel(tunnel_ok)
         if solver_ok and not self.self_test_ok and time.monotonic() >= self.next_self_test:
             self.self_test_ok = self.self_test()
             self.next_self_test = time.monotonic() + 20
@@ -285,6 +303,14 @@ class Agent:
             self.phase, self.ever_ready = "ready", True
         else:
             self.phase = "degraded" if self.ever_ready else "starting"
+
+    def track_tunnel(self, tunnel_ok: bool) -> None:
+        if not self.tunnel or self.draining:
+            return
+        if self.tunnel_was_ok and not tunnel_ok:
+            self.tunnel_drops += 1
+            log(f"tunnel lost all connections (drop #{self.tunnel_drops})")
+        self.tunnel_was_ok = tunnel_ok
 
     def tunnel_watchdog(self, tunnel_ok: bool) -> None:
         """隧道断开超过 TUNNEL_STALL 秒时重启 cloudflared;不计入进程反复退出的次数。"""
@@ -372,6 +398,8 @@ class Agent:
             "pid": os.getpid(),
             "drain_reason": self.drain_reason,
             "tunnel_restarts": self.tunnel_restarts,
+            "tunnel_drops": self.tunnel_drops,
+            "tunnel_protocol": tunnel_protocol(STATE_DIR / "tunnel.log") if self.tunnel else None,
             "started_at": self.started_at.isoformat(),
             "children": {c.name: c.alive for c in self.children},
             "updated": datetime.now(timezone.utc).isoformat(),

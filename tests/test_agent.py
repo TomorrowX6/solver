@@ -82,3 +82,29 @@ def test_tunnel_watchdog_restarts_cloudflared_after_stall(monkeypatch):
     a.draining = True  # 摘流量时隧道由 drain_step 负责
     tick(False, 300)
     assert a.tunnel.starts == 2
+
+
+def test_tunnel_protocol_reads_last_registered_connection(tmp_path):
+    from fleet.agent import tunnel_protocol
+
+    log = tmp_path / "tunnel.log"
+    assert tunnel_protocol(log) is None  # 还没有日志
+    log.write_text(
+        "2026-10-08T05:00:00Z INF Initial protocol quic\n"
+        "2026-10-08T05:00:01Z INF Registered tunnel connection connIndex=0 connection=x event=0 ip=198.41.192.7 location=lax01 protocol=quic\n"
+        "2026-10-08T05:03:00Z INF Switching to fallback protocol http2\n"
+        "2026-10-08T05:03:01Z INF Registered tunnel connection connIndex=0 connection=y event=0 ip=198.41.200.13 location=lax09 protocol=http2\n",
+        encoding="utf-8",
+    )
+    assert tunnel_protocol(log) == "http2"
+
+
+def test_tunnel_drops_are_counted_once_per_outage():
+    a = types.SimpleNamespace(tunnel=object(), draining=False, tunnel_drops=0, tunnel_was_ok=False)
+    for ok in (False, True, True, False, False, True, False):  # 启动时还没连上不算掉线
+        agent_mod.Agent.track_tunnel(a, ok)
+    assert a.tunnel_drops == 2
+    a.draining = True  # 摘流量时主动断开隧道,不算掉线
+    agent_mod.Agent.track_tunnel(a, True)
+    agent_mod.Agent.track_tunnel(a, False)
+    assert a.tunnel_drops == 2
