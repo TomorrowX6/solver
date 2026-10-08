@@ -2,7 +2,7 @@
 //
 // 路由:solver.000.moe/*(用 deploy/wrangler.toml 部署)
 //
-// 对路由自身域名的子请求会直接发往源站(隧道 A),不会再次触发本 Worker;其余隧道通过各自的主机名访问。
+// 每个服务器渠道是一条 Cloudflare 隧道,通过各自的主机名(solver-<位置>.<CHANNEL_ZONE>)访问。
 //   * POST /createTask:随机分流,无空闲名额时改投;POST /getTaskResult:按 taskId 第一位(位置编号)路由回原 worker;
 //   * POST /v1:5 秒盾(FlareSolverr 接口)已下线,直接返回 404;
 //   * GET /(浏览器打开,Accept 含 text/html):控制台页面,旧入口 /admin 跳转到这里;/api/*:控制台接口(见 api.js);
@@ -13,11 +13,11 @@
 
 import ADMIN_HTML from "./admin.html";
 import { handleApi } from "./api.js";
-import { LOG, addLog, authenticate, getChannels, getOptions, intOption, now, refund, reserve, rootKey, safeEqual, settle, sweep } from "./db.js";
+import { LOG, addLog, authenticate, getChannels, getOptions, intOption, now, refund, reserve, rootKey, settle, sweep } from "./db.js";
 
-// 位置 → 主机名;位置 a 为 null,表示使用路由自身的域名(隧道 A)。本地调试可用变量 SLOT_HOSTS(JSON)覆盖。
-// a–d 为 CNB worker;自有服务器渠道(e–p)来自 D1 的 channels 表
-const SLOT_HOSTS = { a: null, b: "solver-b.000.moe", c: "solver-c.000.moe", d: "solver-d.000.moe" };
+// 位置 → 主机名:服务器渠道来自 D1 的 channels 表。本地调试可用变量 SLOT_HOSTS(JSON)加入固定的位置,
+// 主机名为 null 时使用路由自身的域名
+const SLOT_HOSTS = {};
 // taskId 第一位是位置序号(十六进制),与 fleet/agent.py 的 SLOT_ORDER 一致
 const SLOT_ORDER = "abcdefghijklmnop";
 
@@ -35,7 +35,6 @@ const PROXY_TASK_TYPES = new Set(["turnstiletask", "antiturnstiletask"]);
 // 隧道没有连接器(位置未启用或 worker 已下线):30 秒内排到最后再试,避免每个请求都先撞一次
 const OFFLINE_STATUS = new Set([502, 521, 522, 523, 530]);
 const offlineUntil = new Map();
-let lastScaleTrigger = 0;
 
 // 控制台页面不含任何密钥;禁止被嵌入,只允许请求本域名
 const ADMIN_PAGE_HEADERS = {
@@ -86,7 +85,6 @@ class Relay {
     this.ctx = ctx;
     this.url = url;
     this.hosts = { ...(env.SLOT_HOSTS ? JSON.parse(env.SLOT_HOSTS) : SLOT_HOSTS) };
-    this.cnbSlots = new Set(Object.keys(this.hosts));
     this.names = {};
     this.disabled = new Set();
     this.slots = Object.keys(this.hosts); // 接收新请求的位置
@@ -146,7 +144,6 @@ class Relay {
         last = error(500, "upstream_error", String(err));
       }
     }
-    this.saturated = true;
     return last;
   }
 
@@ -165,7 +162,6 @@ class Relay {
         this.mark(slot, null); // 连接失败,换下一个位置
       }
     }
-    this.saturated = true; // 所有位置都满了或不可用:请轮换器扩容
     return last ?? taskError("ERROR_SERVICE_UNAVALIABLE", "所有 worker 均不可用，请稍后重试");
   }
 
@@ -227,27 +223,9 @@ class Relay {
     };
     const all = Object.keys(this.hosts);
     const results = await Promise.all(all.map(one));
-    const describe = (s) => ({ kind: this.cnbSlots.has(s) ? "cnb" : "server", name: this.names[s] || null, disabled: this.disabled.has(s) });
+    const describe = (s) => ({ name: this.names[s] || null, disabled: this.disabled.has(s) });
     return { fetched_at: Date.now() / 1000, slots: Object.fromEntries(all.map((s, i) => [s, { ...describe(s), ...results[i] }])) };
   }
-}
-
-// 所有 worker 都满了或不可用时立即触发一次轮换器(按负载扩容),不等定时任务。全局 3 分钟内最多一次
-async function requestScaleUp(env) {
-  if (!env.CNB_TOKEN || !env.CNB_REPO || !env.DB || Date.now() - lastScaleTrigger < 60000) return;
-  lastScaleTrigger = Date.now();
-  const t = now();
-  const claimed = await env.DB.prepare(
-    `INSERT INTO options (key, value) VALUES ('scale_trigger_at', ?1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE CAST(options.value AS INTEGER) < ?2 RETURNING value`,
-  ).bind(String(t), t - 180).first();
-  if (!claimed) return;
-  const resp = await fetch(`https://api.cnb.cool/${env.CNB_REPO}/-/build/start`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${env.CNB_TOKEN}`, "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ branch: "main", event: "api_trigger_rotate", title: "扩容:worker 全部繁忙", sync: "false" }),
-  });
-  console.log("scale-up trigger", resp.status);
 }
 
 // ------------------------------------------------------------------ 计费路径
@@ -412,13 +390,6 @@ export default {
     }
     // 5 秒盾已下线:不再转发,还没升级的 worker 也就不会再处理
     if (url.pathname === "/v1") return error(404, "not_found", "5 秒盾(/v1)已下线");
-    // 轮换器读取各 worker 的负载(根密钥)
-    if (url.pathname === "/api/fleet" && request.method === "GET") {
-      const root = await rootKey(env);
-      const key = bearerKey(request);
-      if (!root || !key || !safeEqual(key, root)) return error(401, "unauthorized", "需要根密钥");
-      return Response.json(await rt.fleet(root), { headers: { "cache-control": "no-store" } });
-    }
     if (url.pathname.startsWith("/api/")) {
       return handleApi(request, env, url, {
         fleet: (key) => rt.fleet(key),
@@ -428,9 +399,7 @@ export default {
 
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
     const root = await rootKey(env);
-    const resp = await (root ? relayBilled(rt, root, body) : relayPlain(rt, body));
-    if (rt.saturated) ctx.waitUntil(requestScaleUp(env).catch((err) => console.error("scale-up trigger failed", err)));
-    return resp;
+    return root ? relayBilled(rt, root, body) : relayPlain(rt, body);
   },
 
   async scheduled(event, env, ctx) {

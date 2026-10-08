@@ -18,7 +18,7 @@ pip install -r requirements.txt
 python run.py --api-key mykey --backend-url http://127.0.0.1:8191   # 网关:http://127.0.0.1:8000,文档见 /docs
 ```
 
-部署到 CNB 的完整方式(镜像、守护进程、隧道)见 [deploy/README.md](deploy/README.md)。
+完整部署(Cloudflare Worker 控制台、D1、服务器渠道)见 [deploy/README.md](deploy/README.md)。
 
 ## 接口
 
@@ -71,7 +71,7 @@ token 一次性使用,建议拿到后 60 秒内提交;结果在服务端保留 3
 | `ERROR_TASK_NOT_SUPPORTED` | 不支持的任务类型(包括带代理的 `TurnstileTask`) |
 | `ERROR_INVALID_TASK_DATA` | 缺少 task、websiteURL / websiteKey,或 websiteURL 不是 http(s) 地址 |
 | `ERROR_NO_SLOT_AVAILABLE` | 当前没有空闲名额,稍后重试 |
-| `ERROR_TASKID_INVALID` | taskId 不存在、已过期,或创建它的 worker 已轮换下线(重新创建即可) |
+| `ERROR_TASKID_INVALID` | taskId 不存在、已过期,或创建它的 worker 已重启或下线(重新创建即可) |
 | `ERROR_CAPTCHA_UNSOLVABLE` | 识别失败:sitekey 与域名不匹配、超时等,详见 errorDescription |
 | `ERROR_SERVICE_UNAVALIABLE` | 求解器暂不可用 |
 | `ERROR_ZERO_BALANCE` | 积分或令牌额度不足(使用用户令牌时) |
@@ -91,7 +91,8 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 
 `https://solver.000.moe`(由 Cloudflare Worker 提供,数据存于 D1,参照 NewAPI):用户、令牌(`sk-…`)、积分、兑换码、使用日志、渠道状态、系统设置。
 
-- 首次打开时初始化超级管理员,需填写现有的 API Key(校验后作为转发 worker 的根密钥保存)。
+- 首次打开时初始化超级管理员,需填写 API Key:设置了 Worker 密钥 `SOLVER_KEY` 时填它,否则填一台已在运行的 worker 的 API Key
+  (校验后保存)。它是转发给 worker 的根密钥,也会下发给安装的服务器。
 - 调用方文档在控制台「使用文档」页,未登录也可访问:`https://solver.000.moe/#docs`。
 - 用户令牌即 `clientKey` / `X-API-Key`:创建任务时预扣积分,求解成功才结算,失败或 10 分钟未取结果自动退还;`getBalance` 返回账户余额。
 - 现有的 API Key 照常可用且不计费。
@@ -103,13 +104,13 @@ curl -X POST http://127.0.0.1:8000/solve -H "X-API-Key: mykey" -H "Content-Type:
 - 支持 GitHub 与 LINUX DO 登录:在「系统设置 → 第三方登录」填写对应应用的 Client ID / Secret;开放该方式注册时首次登录自动创建账号,
   已有账号可在「个人设置」中绑定。可开启「仅第三方登录」:登录页只显示 GitHub / LINUX DO 按钮,密码登录与密码注册关闭
   (两种都未启用时自动退回密码登录;保存会导致自己无法登录的设置时会被拒绝)。
-- worker 的 `GET /admin/stats`(需根密钥)提供渠道页的数据,只保存在进程内,worker 轮换后清零。
+- worker 的 `GET /admin/stats`(需根密钥)提供渠道页的数据,只保存在进程内,worker 重启后清零。
 
 ### 自有服务器渠道
 
-除了 CNB 上自动扩缩的 worker,任意 Linux 服务器(x86_64 / arm64,建议 4 核 8GB 以上)都可以作为渠道接入,
-与 CNB worker 一起分流和计费。控制台「渠道」页点「添加服务器」(需先在「系统设置 → 服务器渠道」填写 Cloudflare API Token),
-会自动创建 Cloudflare 隧道和 `solver-<位置>.000.moe` 域名,并给出安装命令,在服务器上以 root 执行:
+任意 Linux 服务器(x86_64 / arm64,建议 4 核 8GB 以上)都可以作为渠道接入,由 Worker 分流和计费,最多 16 台(位置 a–p)。
+控制台「渠道」页点「添加服务器」(需先在「系统设置 → 服务器渠道」填写 Cloudflare API Token),
+会自动创建 Cloudflare 隧道和 `solver-<位置>.<CHANNEL_ZONE>` 域名,并给出安装命令,在服务器上以 root 执行:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/TomorrowX6/solver/main/install.sh) -e https://solver.000.moe -t <安装令牌>
@@ -118,8 +119,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/TomorrowX6/solver/main/insta
 脚本会按需安装 Docker,拉取镜像 `ghcr.io/tomorrowx6/solver`(GitHub Actions 构建,amd64 / arm64),
 按控制台为该渠道设置的并发数(未设置时按 CPU 与内存自动计算,最多 32;命令行 `--concurrency N` 优先)
 启动容器(开机自启),并等待自检通过。在控制台修改并发后,重新执行安装命令生效。重复执行即升级;`--uninstall` 卸载;
-国内服务器加 `--cn` 用阿里云镜像安装 Docker。服务器常驻运行,不参与 CNB 的轮换与扩缩;
-在控制台禁用渠道后不再分配新任务,删除渠道会同时删除它的隧道和域名。
+国内服务器加 `--cn` 用阿里云镜像安装 Docker。在控制台禁用渠道后不再分配新任务,删除渠道会同时删除它的隧道和域名。
 
 不想用 Docker 时在命令末尾加 `--no-docker`(安装窗口里可切换):直接在系统上安装浏览器、Python 3.11(uv 管理)、
 FlareSolverr v3.5.2(打与镜像相同的补丁)和 cloudflared,装到 `/opt/turnstile-solver`,以 `turnstile` 用户运行 systemd 服务

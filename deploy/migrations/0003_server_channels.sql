@@ -1,5 +1,5 @@
 -- 自有服务器渠道:每台服务器一条 Cloudflare 隧道与一个 solver-<位置>.<域名> 主机名
--- 位置 a–d 由 CNB 轮换器管理,服务器使用 e–p(taskId 第一位为位置序号,最多 16 个位置)
+-- 位置为 a–p(taskId 第一位为位置序号,最多 16 个位置)
 
 CREATE TABLE channels (
   slot TEXT PRIMARY KEY,

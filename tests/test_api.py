@@ -494,7 +494,7 @@ def test_solve_log_keeps_recent_and_minute_buckets():
 
 def test_admin_stats(make_client, tmp_path):
     state = tmp_path / "state.json"
-    state.write_text(json.dumps({"phase": "ready", "slot": "b", "tunnel_token": "TUNNEL_TOKEN_B", "fleet_version": "9"}))
+    state.write_text(json.dumps({"phase": "ready", "slot": "b", "tunnel_token": "TUNNEL_TOKEN_B", "started_at": "2026-10-08T00:00:00+00:00"}))
     with make_client(agent_state_file=str(state)) as c:
         assert c.get("/admin/stats").status_code == 401
         assert c.post("/solve", json=SOLVE, headers=AUTH).status_code == 200
@@ -502,7 +502,7 @@ def test_admin_stats(make_client, tmp_path):
         assert r.status_code == 200
         data = r.json()
         assert data["health"]["status"] == "ok" and data["health"]["solved"] == 1
-        assert data["agent"] == {"phase": "ready", "slot": "b", "fleet_version": "9"}  # 不返回隧道令牌来源
+        assert data["agent"] == {"phase": "ready", "slot": "b", "started_at": "2026-10-08T00:00:00+00:00"}  # 不返回隧道令牌来源
         assert data["recent"][0]["host"] == "example.com" and data["recent"][0]["ok"] is True
         assert data["minutes"][0][1] == 1
     with make_client(agent_state_file=str(tmp_path / "missing.json")) as c:

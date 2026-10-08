@@ -1232,7 +1232,6 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
 
   // ---------------------------------------------------------------- 渠道(worker)
   function workerState(s) {
-    if (s && s.kind === "cnb" && s.error === "HTTP 530") return { color: "", text: "未运行" };
     if (!s || s.error) return { color: "red", text: "离线" };
     const phase = s.agent && s.agent.phase;
     if (phase === "draining" || phase === "drained") return { color: "orange", text: "下线中" };
@@ -1349,12 +1348,10 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
       });
       card.replaceChildren(table([
         { title: "位置", render: (r) => h("div", { class: "slot-badge" }, r.slot) },
-        { title: "类型", render: (r) => (r.s && r.s.kind === "server" ? tag(r.s.name || "服务器", "violet") : tag("CNB", "cyan")) },
+        { title: "名称", render: (r) => tag((r.s && r.s.name) || "服务器", "violet") },
         { title: "Worker", render: (r) => h("span", { class: "mono" }, r.hl && r.hl.worker ? r.hl.worker.split("/")[0] : "—") },
         { title: "状态", render: (r) => { if (r.s && r.s.disabled) return tag("已禁用"); const st = workerState(r.s); return dotTag(st.text, st.color); } },
-        { title: "版本", render: (r) => (r.s && r.s.agent && r.s.agent.fleet_version ? tag(`v${r.s.agent.fleet_version}`, "blue", r.s.agent.commit || "") : r.s && r.s.legacy ? tag("旧版") : "—") },
         { title: "运行", render: (r) => { const a = r.s && r.s.agent; return a && a.started_at ? duration(now - Date.parse(a.started_at) / 1000) : "—"; } },
-        { title: "轮换", render: (r) => { const a = r.s && r.s.agent; if (!a || !a.drain_at) return "—"; const t = Date.parse(a.drain_at) / 1000; return t > now ? duration(t - now) : "进行中"; } },
         { title: "并发", render: (r) => (r.hl ? h("span", {}, h("span", { class: "bar" }, h("span", { style: `width:${Math.min(100, (r.hl.active / (r.hl.capacity || 1)) * 100)}%` })), `${r.hl.active}/${r.hl.capacity}`, r.hl.queued ? h("span", { class: "t2" }, ` +${r.hl.queued}`) : null) : "—") },
         { title: "成功", num: true, render: (r) => (r.hl ? num(r.hl.solved) : "—") },
         { title: "失败", num: true, render: (r) => (r.hl ? h("span", { class: r.hl.solve_failed ? "neg" : null }, num(r.hl.solve_failed)) : "—") },

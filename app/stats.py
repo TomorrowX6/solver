@@ -1,6 +1,6 @@
 """求解记录:最近的求解明细与按分钟的计数,供后台面板(GET /admin/stats)展示。
 
-只保存在进程内,worker 轮换后清零;面板汇总所有 worker 的数据。
+只保存在进程内,worker 重启后清零;面板汇总所有 worker 的数据。
 """
 
 from __future__ import annotations

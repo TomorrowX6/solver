@@ -6,7 +6,7 @@ main = "cf-worker.js"
 compatibility_date = "2026-10-01"
 account_id = "7e91b0eadb038a578d12d625c9ed006b"
 
-# 只通过路由提供服务。workers.dev 地址上的请求会把位置 a 解析成 workers.dev 自身,没有意义,关闭
+# 只通过路由提供服务,关闭 workers.dev 地址
 workers_dev = false
 preview_urls = false
 
@@ -26,9 +26,7 @@ database_name = "solver-db"
 database_id = "d252216e-49b6-4ba2-9153-92426ee4422b"
 migrations_dir = "migrations"
 
-# worker 全部繁忙时触发轮换器扩容;访问令牌用 Worker 密钥 CNB_TOKEN(wrangler secret put CNB_TOKEN)
 [vars]
-CNB_REPO = "AzusaMoe/turnstile-solver"
 # 服务器渠道:隧道建在这个账户下,主机名为 solver-<位置>.<CHANNEL_ZONE>;安装脚本来自公开仓库
 CF_ACCOUNT_ID = "7e91b0eadb038a578d12d625c9ed006b"
 CHANNEL_ZONE = "000.moe"

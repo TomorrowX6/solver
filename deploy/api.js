@@ -700,8 +700,8 @@ async function fleet(c) {
 }
 
 // ------------------------------------------------------------------ 管理:服务器渠道
-// 位置 a–d 归 CNB 轮换器;服务器渠道使用 e–p
-const SERVER_SLOTS = "efghijklmnop";
+// 服务器渠道的位置:taskId 第一位是位置序号(十六进制),所以最多 16 个
+const SERVER_SLOTS = "abcdefghijklmnop";
 
 function cloudflareConfig(c, options) {
   return { token: options.cf_api_token, accountId: c.env.CF_ACCOUNT_ID, zone: c.env.CHANNEL_ZONE, api: c.env.CF_API_BASE };
@@ -739,7 +739,7 @@ async function createChannel(c) {
   const { results } = await c.env.DB.prepare("SELECT slot FROM channels").all();
   const used = new Set(results.map((r) => r.slot));
   const slot = [...SERVER_SLOTS].find((x) => !used.has(x));
-  check(slot, "服务器渠道已满(最多 12 个)");
+  check(slot, "服务器渠道已满(最多 16 个)");
   let tunnel;
   try {
     tunnel = await createTunnel(cfg, slot, randomString(6).toLowerCase());
@@ -820,7 +820,6 @@ async function channelConfig(c) {
     `FLEET_SLOT=${ch.slot}`,
     `TUNNEL_TOKEN_${ch.slot.toUpperCase()}=${tunnel}`,
     `TS_API_KEY=${root}`,
-    "AGENT_PERMANENT=1",
     "TS_ATTEMPT_TIMEOUT=35",
     "TS_MAX_TIMEOUT=85",
     "TS_STALL_SECONDS=20",

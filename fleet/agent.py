@@ -1,10 +1,10 @@
-"""Worker 守护进程:在云原生开发环境内拉起 FlareSolverr、网关、cloudflared,并在生命周期末尾主动摘流量。
+"""Worker 守护进程:拉起 FlareSolverr、网关、cloudflared,进程退出时自动重启,并写出状态供控制台显示。
 
-    python -m fleet.agent run     # 守护运行(start-worker.sh 以后台方式启动)
-    python -m fleet.agent wait    # 阻塞到就绪,作为 start-worker 阶段的成败依据
-    python -m fleet.agent drain   # 立即摘流量并等待完成(endStages 使用)
+    python -m fleet.agent run     # 守护运行(服务器镜像与 systemd 服务的入口)
+    python -m fleet.agent wait    # 阻塞到就绪(自检通过)
+    python -m fleet.agent drain   # 摘流量:停止接收新任务,等进行中的任务完成后断开隧道
 
-需要的环境变量(来自密钥仓库):TUNNEL_TOKEN(位置 b 为 TUNNEL_TOKEN_B)、TS_API_KEY。
+需要的环境变量(安装脚本从控制台取得):TUNNEL_TOKEN_<位置>(或 TUNNEL_TOKEN)、TS_API_KEY。
 FLEET_SLOT 指定 worker 所在位置,默认 a。
 """
 
@@ -24,8 +24,6 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .schedule import Policy, parse_time, timeline
-
 ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = Path(os.getenv("AGENT_STATE_DIR", "/tmp/turnstile-agent"))
 STATE_FILE = STATE_DIR / "state.json"
@@ -36,9 +34,11 @@ TUNNEL_GRACE = int(os.getenv("TUNNEL_GRACE_SECONDS", "60"))
 # 摘流量时先停止接收新任务,等进行中的任务结束(最多 DRAIN_MAX 秒)并留 DRAIN_TAIL 秒给客户端取结果,再断开隧道
 DRAIN_MAX = int(os.getenv("AGENT_DRAIN_MAX_SECONDS", "120"))
 DRAIN_TAIL = 10
+# 看门狗:隧道断开(没有任何连接)超过 TUNNEL_STALL 秒就重启 cloudflared,每 TUNNEL_KICK_INTERVAL 秒最多一次。
+# 出口 NAT 重置时所有连接同时断开,cloudflared 按指数退避重连要几分钟,新进程则立即重连
+TUNNEL_STALL = int(os.getenv("AGENT_TUNNEL_STALL_SECONDS", "20"))
+TUNNEL_KICK_INTERVAL = 60
 TUNNEL_ENABLED = os.getenv("AGENT_DISABLE_TUNNEL", "") not in {"1", "true", "yes"}
-# 常驻模式(自有服务器渠道):没有平台回收,不按生命周期摘流量
-PERMANENT = os.getenv("AGENT_PERMANENT", "") in {"1", "true", "yes"}
 # FlareSolverr 源码目录与端口(上游镜像中位于 /app)
 FLARESOLVERR_DIR = Path(os.getenv("FLARESOLVERR_DIR", "/app"))
 FLARESOLVERR_PORT = int(os.getenv("FLARESOLVERR_PORT", "8191"))
@@ -135,11 +135,9 @@ class Child:
 
 class Agent:
     def __init__(self) -> None:
-        self.policy = Policy.from_env()
-        started = os.getenv("CNB_BUILD_START_TIME")
-        self.timeline = timeline(parse_time(started) if started else datetime.now(timezone.utc), self.policy)
-        # CNB 上是构建号;自有服务器用主机名加启动时间,重启后旧任务号不会被误认
-        self.worker_id = os.getenv("CNB_BUILD_ID") or os.getenv("AGENT_WORKER_ID") or f"{socket.gethostname()}-{int(time.time())}"
+        self.started_at = datetime.now(timezone.utc)
+        # 主机名加启动时间:重启后旧任务号不会被误认
+        self.worker_id = os.getenv("AGENT_WORKER_ID") or f"{socket.gethostname()}-{int(time.time())}"
         self.slot = os.getenv("FLEET_SLOT", "a").strip().lower() or "a"
         self.tunnel_token, self.tunnel_source = tunnel_token_for(self.slot, dict(os.environ))
         # 不接隧道(自检)时服务不对外,没有配置就随机生成一个,只供自检使用
@@ -154,6 +152,9 @@ class Agent:
         self.drain_started = 0.0
         self.idle_since: float | None = None
         self.stop_requested = False
+        self.tunnel_down_since: float | None = None
+        self.tunnel_kicked_at = float("-inf")
+        self.tunnel_restarts = 0
 
         # 业务进程都不需要隧道令牌
         base_env = {k: v for k, v in os.environ.items() if not k.startswith("TUNNEL_TOKEN")}
@@ -172,9 +173,9 @@ class Agent:
             "TS_BACKEND_URL": f"http://127.0.0.1:{FLARESOLVERR_PORT}",
             "TS_WORKER_ID": f"{self.worker_id}/{self.slot}",
             "TS_API_KEY": self.api_key,
-            # taskId 第一段:位置编号(Cloudflare Worker 据此路由查询)+ worker 标识(识别轮换前的旧任务)
+            # taskId 第一段:位置编号(Cloudflare Worker 据此路由查询)+ worker 标识(识别重启前的旧任务)
             "TS_TASK_PREFIX": task_prefix(self.slot, self.worker_id),
-            # 网关在 /admin/stats 中返回守护进程的状态(阶段、摘流量与回收时间、版本)
+            # 网关在 /admin/stats 中返回守护进程的状态(阶段、启动时间)
             "TS_AGENT_STATE_FILE": str(STATE_FILE),
             # 摘流量标记:存在时网关不再接受新任务
             "TS_DRAIN_FILE": str(DRAIN_FILE),
@@ -217,11 +218,7 @@ class Agent:
         DRAIN_FILE.unlink(missing_ok=True)
         signal.signal(signal.SIGTERM, self._on_signal)
         signal.signal(signal.SIGINT, self._on_signal)
-        t = self.timeline
-        log(
-            f"worker={self.worker_id} slot={self.slot} tunnel={self.tunnel_source if TUNNEL_ENABLED else 'disabled'} "
-            + ("permanent" if PERMANENT else f"drain_at={t.drain_at.isoformat()} kill_at={t.kill_at.isoformat()}")
-        )
+        log(f"worker={self.worker_id} slot={self.slot} tunnel={self.tunnel_source if TUNNEL_ENABLED else 'disabled'}")
 
         # FlareSolverr 启动自检时 undetected-chromedriver 会改写 /app/chromedriver;
         # 网关预热也会启动浏览器,同时改写会损坏驱动,所以等 FlareSolverr 健康后再启动其余进程
@@ -249,12 +246,8 @@ class Agent:
         return 0
 
     def tick(self) -> None:
-        now = datetime.now(timezone.utc)
-        if not self.draining:
-            if not PERMANENT and now >= self.timeline.drain_at:
-                self.begin_drain("到达生命周期末尾")
-            elif DRAIN_FILE.exists():
-                self.begin_drain("收到摘流量请求")
+        if not self.draining and DRAIN_FILE.exists():
+            self.begin_drain("收到摘流量请求")
 
         for child in self.children:
             if child.alive or (child is self.tunnel and self.draining):
@@ -277,6 +270,7 @@ class Agent:
         if self.draining:
             self.drain_step(health)
         tunnel_ok = self.tunnel is None or http_ok(f"http://{METRICS}/ready")
+        self.tunnel_watchdog(tunnel_ok)
         if solver_ok and not self.self_test_ok and time.monotonic() >= self.next_self_test:
             self.self_test_ok = self.self_test()
             self.next_self_test = time.monotonic() + 20
@@ -291,6 +285,29 @@ class Agent:
             self.phase, self.ever_ready = "ready", True
         else:
             self.phase = "degraded" if self.ever_ready else "starting"
+
+    def tunnel_watchdog(self, tunnel_ok: bool) -> None:
+        """隧道断开超过 TUNNEL_STALL 秒时重启 cloudflared;不计入进程反复退出的次数。"""
+        tunnel = self.tunnel
+        if not tunnel or self.draining or not tunnel.alive or tunnel_ok:
+            self.tunnel_down_since = None
+            return
+        now = time.monotonic()
+        if self.tunnel_down_since is None:
+            self.tunnel_down_since = now
+            return
+        if now - self.tunnel_down_since < TUNNEL_STALL or now - self.tunnel_kicked_at < TUNNEL_KICK_INTERVAL:
+            return
+        log(f"tunnel disconnected for {now - self.tunnel_down_since:.0f}s, restarting cloudflared")
+        assert tunnel.proc is not None
+        tunnel.proc.kill()  # 没有连接,也就没有进行中的请求,不必等 grace period
+        try:
+            tunnel.proc.wait(5)
+        except subprocess.TimeoutExpired:
+            pass
+        tunnel.start()
+        self.tunnel_kicked_at = self.tunnel_down_since = now
+        self.tunnel_restarts += 1
 
     def _post(self, path: str, body: dict, timeout: float = 70) -> dict:
         req = urllib.request.Request(
@@ -354,12 +371,8 @@ class Agent:
             "tunnel_token": self.tunnel_source if TUNNEL_ENABLED else None,
             "pid": os.getpid(),
             "drain_reason": self.drain_reason,
-            # 版本由轮换器创建 worker 时传入;commit 为构建所用的提交
-            "fleet_version": os.getenv("FLEET_VERSION") or None,
-            "commit": (os.getenv("CNB_COMMIT") or "")[:7] or None,
-            "started_at": self.timeline.start.isoformat(),
-            "drain_at": None if PERMANENT else self.timeline.drain_at.isoformat(),
-            "kill_at": None if PERMANENT else self.timeline.kill_at.isoformat(),
+            "tunnel_restarts": self.tunnel_restarts,
+            "started_at": self.started_at.isoformat(),
             "children": {c.name: c.alive for c in self.children},
             "updated": datetime.now(timezone.utc).isoformat(),
         }

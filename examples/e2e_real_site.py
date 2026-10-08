@@ -3,7 +3,7 @@
     SOLVER_URL=https://solver.000.moe TS_API_KEY=... python examples/e2e_real_site.py
 
 环境变量:
-    SOLVER_URL   网关地址(流水线内默认取 FLEET_PUBLIC_URL)
+    SOLVER_URL   网关地址
     TS_API_KEY   网关的 API Key
     E2E_MODE     task(默认,createTask + 每 3 秒 getTaskResult)或 solve(POST /solve 同步)
     SITE_URL     测试站点,默认 https://turnstile-test.000.moe(提供 /config 与 /verify,见 testsite/)
@@ -114,7 +114,7 @@ def main() -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
-    solver = (os.getenv("SOLVER_URL") or os.getenv("FLEET_PUBLIC_URL") or "").rstrip("/")
+    solver = os.getenv("SOLVER_URL", "").rstrip("/")
     key = os.getenv("TS_API_KEY", "")
     site = os.getenv("SITE_URL", "https://turnstile-test.000.moe").rstrip("/")
     rounds = [int(x) for x in os.getenv("E2E_ROUNDS", "1,8,24").split(",")]

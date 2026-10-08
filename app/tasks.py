@@ -6,7 +6,7 @@
 响应一律为 HTTP 200,用 errorId / errorCode 表示成败,与这类打码平台的客户端兼容。
 
 taskId 为 UUID 格式;多副本部署时第一段是「位置编号 + worker 标识」(TS_TASK_PREFIX),
-Cloudflare Worker 按第一位把查询路由回创建任务的 worker,worker 标识用来识别轮换前的旧任务。
+Cloudflare Worker 按第一位把查询路由回创建任务的 worker,worker 标识用来识别重启前的旧任务。
 """
 
 from __future__ import annotations
@@ -162,8 +162,8 @@ class TaskManager:
         if not isinstance(task_id, str) or not task_id:
             raise TaskError("ERROR_TASKID_INVALID", "缺少 taskId")
         if self.prefix and not task_id.startswith(self.prefix):
-            # 同位置不同 worker 签发:创建它的 worker 已轮换下线,结果无法取回
-            raise TaskError("ERROR_TASKID_INVALID", "任务不存在:创建该任务的 worker 已轮换下线，请重新创建")
+            # 同位置不同 worker 签发:创建它的 worker 已重启或下线,结果无法取回
+            raise TaskError("ERROR_TASKID_INVALID", "任务不存在:创建该任务的 worker 已重启或下线，请重新创建")
         item = self._tasks.get(task_id)
         if item is None:
             raise TaskError("ERROR_TASKID_INVALID", "任务不存在或已过期")
