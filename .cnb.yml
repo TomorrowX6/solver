@@ -23,7 +23,7 @@
     FLEET_MIN: "2"
     FLEET_MAX: "4"
     # 上线新版本时把这个数字加一并推送,轮换器会按错开规则逐个替换旧版本 worker
-    FLEET_VERSION: "15"
+    FLEET_VERSION: "16"
     # 账号最多同时运行 6 个 CPU 开发环境(含其他仓库与自检环境),超出会被平台拒绝
     FLEET_MAX_WORKSPACES: "6"
   stages:
@@ -82,6 +82,9 @@ main:
       env:
         <<: *worker_env
         FLEET_SLOT: a
+        # 对照实验:位置 a 优先用 QUIC(连不上时 cloudflared 自动退回 http2),其他位置用 http2。
+        # 两者的掉线次数见控制台「渠道」页的「隧道」列
+        TUNNEL_PROTOCOL: auto
 
   api_trigger_worker_b:
     - <<: *worker
