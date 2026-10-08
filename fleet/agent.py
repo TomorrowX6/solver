@@ -36,6 +36,10 @@ TUNNEL_GRACE = int(os.getenv("TUNNEL_GRACE_SECONDS", "60"))
 # 摘流量时先停止接收新任务,等进行中的任务结束(最多 DRAIN_MAX 秒)并留 DRAIN_TAIL 秒给客户端取结果,再断开隧道
 DRAIN_MAX = int(os.getenv("AGENT_DRAIN_MAX_SECONDS", "120"))
 DRAIN_TAIL = 10
+# 看门狗:隧道断开(没有任何连接)超过 TUNNEL_STALL 秒就重启 cloudflared,每 TUNNEL_KICK_INTERVAL 秒最多一次。
+# 出口 NAT 重置时所有连接同时断开,cloudflared 按指数退避重连要几分钟,新进程则立即重连
+TUNNEL_STALL = int(os.getenv("AGENT_TUNNEL_STALL_SECONDS", "20"))
+TUNNEL_KICK_INTERVAL = 60
 TUNNEL_ENABLED = os.getenv("AGENT_DISABLE_TUNNEL", "") not in {"1", "true", "yes"}
 # 常驻模式(自有服务器渠道):没有平台回收,不按生命周期摘流量
 PERMANENT = os.getenv("AGENT_PERMANENT", "") in {"1", "true", "yes"}
@@ -154,6 +158,9 @@ class Agent:
         self.drain_started = 0.0
         self.idle_since: float | None = None
         self.stop_requested = False
+        self.tunnel_down_since: float | None = None
+        self.tunnel_kicked_at = float("-inf")
+        self.tunnel_restarts = 0
 
         # 业务进程都不需要隧道令牌
         base_env = {k: v for k, v in os.environ.items() if not k.startswith("TUNNEL_TOKEN")}
@@ -277,6 +284,7 @@ class Agent:
         if self.draining:
             self.drain_step(health)
         tunnel_ok = self.tunnel is None or http_ok(f"http://{METRICS}/ready")
+        self.tunnel_watchdog(tunnel_ok)
         if solver_ok and not self.self_test_ok and time.monotonic() >= self.next_self_test:
             self.self_test_ok = self.self_test()
             self.next_self_test = time.monotonic() + 20
@@ -291,6 +299,29 @@ class Agent:
             self.phase, self.ever_ready = "ready", True
         else:
             self.phase = "degraded" if self.ever_ready else "starting"
+
+    def tunnel_watchdog(self, tunnel_ok: bool) -> None:
+        """隧道断开超过 TUNNEL_STALL 秒时重启 cloudflared;不计入进程反复退出的次数。"""
+        tunnel = self.tunnel
+        if not tunnel or self.draining or not tunnel.alive or tunnel_ok:
+            self.tunnel_down_since = None
+            return
+        now = time.monotonic()
+        if self.tunnel_down_since is None:
+            self.tunnel_down_since = now
+            return
+        if now - self.tunnel_down_since < TUNNEL_STALL or now - self.tunnel_kicked_at < TUNNEL_KICK_INTERVAL:
+            return
+        log(f"tunnel disconnected for {now - self.tunnel_down_since:.0f}s, restarting cloudflared")
+        assert tunnel.proc is not None
+        tunnel.proc.kill()  # 没有连接,也就没有进行中的请求,不必等 grace period
+        try:
+            tunnel.proc.wait(5)
+        except subprocess.TimeoutExpired:
+            pass
+        tunnel.start()
+        self.tunnel_kicked_at = self.tunnel_down_since = now
+        self.tunnel_restarts += 1
 
     def _post(self, path: str, body: dict, timeout: float = 70) -> dict:
         req = urllib.request.Request(
@@ -354,6 +385,7 @@ class Agent:
             "tunnel_token": self.tunnel_source if TUNNEL_ENABLED else None,
             "pid": os.getpid(),
             "drain_reason": self.drain_reason,
+            "tunnel_restarts": self.tunnel_restarts,
             # 版本由轮换器创建 worker 时传入;commit 为构建所用的提交
             "fleet_version": os.getenv("FLEET_VERSION") or None,
             "commit": (os.getenv("CNB_COMMIT") or "")[:7] or None,

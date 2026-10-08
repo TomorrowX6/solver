@@ -375,3 +375,46 @@ def test_drain_closes_tunnel_only_after_worker_is_idle(monkeypatch):
     clock["t"] = 100.0 + agent_mod.DRAIN_MAX + 1
     agent_mod.Agent.drain_step(b, {"active": 3, "queued": 1, "tasks_pending": 4})
     assert b.tunnel.term_sent_at is not None
+
+
+def test_tunnel_watchdog_restarts_cloudflared_after_stall(monkeypatch):
+    import types
+
+    import fleet.agent as agent_mod
+
+    class Proc:
+        def kill(self):
+            pass
+
+        def wait(self, timeout):
+            return 0
+
+    class Tunnel:
+        alive = True
+        proc = Proc()
+        starts = 0
+
+        def start(self):
+            self.starts += 1
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(agent_mod.time, "monotonic", lambda: clock["t"])
+    a = types.SimpleNamespace(tunnel=Tunnel(), draining=False, tunnel_down_since=None, tunnel_kicked_at=float("-inf"), tunnel_restarts=0)
+    tick = lambda ok, t: (clock.update(t=t), agent_mod.Agent.tunnel_watchdog(a, ok))  # noqa: E731
+    tick(True, 0)
+    tick(False, 5)  # 刚断开:开始计时
+    tick(False, 20)
+    assert a.tunnel.starts == 0
+    tick(False, 26)  # 断开超过 20 秒:重启
+    assert a.tunnel.starts == 1 and a.tunnel_restarts == 1
+    tick(False, 60)  # 60 秒内最多重启一次
+    assert a.tunnel.starts == 1
+    tick(False, 87)
+    assert a.tunnel.starts == 2
+    tick(True, 90)  # 连上后重新计时
+    tick(False, 95)
+    tick(False, 120)
+    assert a.tunnel.starts == 2 and a.tunnel_down_since == 95
+    a.draining = True  # 摘流量时隧道由 drain_step 负责
+    tick(False, 300)
+    assert a.tunnel.starts == 2

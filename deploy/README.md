@@ -193,7 +193,9 @@ npx wrangler@4 deploy --config deploy/wrangler.toml
 安装脚本用安装令牌从 `/api/channel/config` 取得位置、隧道令牌与 API Key;`--no-docker` 时不用镜像,
 按 `.ide/Dockerfile` 的内容在系统上直接安装(FlareSolverr 版本与补丁写在 `install.sh` 里,升级基础镜像时同步修改)。镜像由 GitHub 公开仓库
 TomorrowX6/solver 的 Actions(`.github/workflows/image.yml`、`docker-bake.hcl`)构建。
-GitHub 上的历史与 CNB 独立,更新时用 `scripts/publish-github.sh "说明"` 把 main 的当前代码作为一个新提交同步过去。
+GitHub 上的历史与 CNB 独立,更新时用 `scripts/publish-github.sh "说明"` 同步:`cnb` 分支为 main 的完整代码,
+`main` 分支为本仓库的 `public` 分支(不含 CNB 部署:没有 .cnb.yml、轮换器与 CNB 位置,服务器渠道可用 a–p,部署文档改为自托管)。
+脚本先把 main 合并进 public(CNB 专用文件的修改直接丢弃,出现其他冲突或 CNB 内容时停下),再分别推送;之后把 public 也推到 CNB。
 
 GitHub 登录:在 GitHub → Settings → Developer settings → OAuth Apps 新建应用,Homepage 填 `https://solver.000.moe`,
 回调地址填 `https://solver.000.moe/api/oauth/github/callback`,再把 Client ID / Secret 填到控制台「系统设置 → 第三方登录」。
