@@ -511,14 +511,34 @@ async function listLogs(c) {
     where.push("user_id = ?");
     args.push(c.user.id);
   }
-  if (toInt(q.get("type"))) { where.push("type = ?"); args.push(toInt(q.get("type"))); }
+  // type 可以是逗号分隔的多个类型,例如 2,5 = 求解的成功与失败
+  const types = String(q.get("type") || "").split(",").map((t) => toInt(t)).filter((t) => t >= 1 && t <= 5);
+  if (types.length) { where.push(`type IN (${types.map(() => "?").join(", ")})`); args.push(...types); }
   if (q.get("token_name")) { where.push("token_name = ?"); args.push(q.get("token_name").trim()); }
+  if (q.get("host")) { where.push("host = ?"); args.push(q.get("host").trim()); }
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const [rows, total] = await c.env.DB.batch([
     c.env.DB.prepare(`SELECT * FROM logs ${clause} ORDER BY id DESC LIMIT ? OFFSET ?`).bind(...args, size, offset),
     c.env.DB.prepare(`SELECT COUNT(*) AS n FROM logs ${clause}`).bind(...args),
   ]);
   return ok({ items: rows.results, total: total.results[0].n, p, size });
+}
+
+// 管理员:最近 hours 小时里失败最多的用户与站点(成功 = 消费日志,失败 = 错误日志)
+async function logSummary(c) {
+  const hours = Math.min(24 * 30, Math.max(1, toInt(c.url.searchParams.get("hours"), 24)));
+  const since = now() - hours * 3600;
+  const top = (col) => c.env.DB.prepare(
+    `SELECT ${col} AS name, SUM(type = 2) AS ok, SUM(type = 5) AS fail FROM logs
+     WHERE created_at > ? AND type IN (2, 5) GROUP BY ${col} ORDER BY fail DESC, ok DESC LIMIT 8`,
+  ).bind(since);
+  const [users, hosts, totals] = await c.env.DB.batch([
+    top("username"),
+    top("host"),
+    c.env.DB.prepare("SELECT SUM(type = 2) AS ok, SUM(type = 5) AS fail FROM logs WHERE created_at > ? AND type IN (2, 5)").bind(since),
+  ]);
+  const t = totals.results[0] || {};
+  return ok({ hours, users: users.results, hosts: hosts.results, ok: t.ok || 0, fail: t.fail || 0 });
 }
 
 // ------------------------------------------------------------------ 管理:用户
@@ -861,6 +881,7 @@ const ROUTES = [
   ["GET", "/api/admin/option", getOptionList, ROLE.ADMIN],
   ["PUT", "/api/admin/option", updateOptions, ROLE.ADMIN],
   ["GET", "/api/admin/fleet", fleet, ROLE.ADMIN],
+  ["GET", "/api/admin/log/summary", logSummary, ROLE.ADMIN],
   ["GET", "/api/admin/channels", listChannels, ROLE.ADMIN],
   ["POST", "/api/admin/channels", createChannel, ROLE.ADMIN],
   ["PUT", "/api/admin/channels/:slot", updateChannel, ROLE.ADMIN],
