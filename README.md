@@ -71,6 +71,7 @@ token 一次性使用,建议拿到后 60 秒内提交;结果在服务端保留 3
 | `ERROR_TASK_NOT_SUPPORTED` | 不支持的任务类型(包括带代理的 `TurnstileTask`) |
 | `ERROR_INVALID_TASK_DATA` | 缺少 task、websiteURL / websiteKey,websiteURL 不是 http(s) 地址,或 websiteKey 不是 Turnstile sitekey(`0x` 开头,测试 sitekey 为 `1x`–`3x`) |
 | `ERROR_NO_SLOT_AVAILABLE` | 当前没有空闲名额,稍后重试 |
+| `ERROR_TOO_MUCH_REQUESTS` | 使用用户令牌时,同一站点当天(北京时间)失败超过上限(默认 333 次,「系统设置 → 基础设置」可改),HTTP 429,次日 0 点恢复 |
 | `ERROR_TASKID_INVALID` | taskId 不存在、已过期,或创建它的 worker 已轮换下线(重新创建即可) |
 | `ERROR_CAPTCHA_UNSOLVABLE` | 识别失败:sitekey 与域名不匹配、目标页面在 Cloudflare 验证页(5 秒盾)之后、超时等,详见 errorDescription |
 | `ERROR_SERVICE_UNAVALIABLE` | 求解器暂不可用 |

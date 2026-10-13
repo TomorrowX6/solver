@@ -53,6 +53,7 @@ export async function verifyPassword(password, stored) {
 export const OPTION_DEFAULTS = {
   system_name: "Turnstile Solver",
   price_turnstile: "1", // 每次成功求解扣除的积分
+  host_error_limit: "333", // 同一用户同一站点当天(北京时间)失败超过这个次数后新请求直接返回 429;0 表示不限
   // 开放注册:按方式分别控制;关闭的方式不能创建新账号,已有账号仍可登录
   register_password_enabled: "false",
   register_github_enabled: "false",
