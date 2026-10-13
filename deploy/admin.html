@@ -328,6 +328,8 @@
   const SVGNS = "http://www.w3.org/2000/svg";
   const ROLE = { USER: 1, ADMIN: 10, ROOT: 100 };
   const ROLE_TAG = { 1: ["普通用户", ""], 10: ["管理员", "orange"], 100: ["超级管理员", "violet"] };
+  // taskId 第一位是位置序号(十六进制),与 cf-worker.js 的 SLOT_ORDER 一致
+  const SLOT_ORDER = "abcdefghijklmnop";
   const LOG_TYPES = { 1: ["充值", "cyan"], 2: ["消费", "green"], 3: ["管理", "orange"], 4: ["系统", "violet"], 5: ["错误", "red"] };
   const REDEEM_STATUS = { 1: ["未使用", "green"], 2: ["已禁用", ""], 3: ["已使用", "blue"] };
   const PAGE_SIZE = 20;
@@ -576,6 +578,7 @@
     { id: "channel", group: "管理员", name: "渠道", icon: "server", render: pageChannel, admin: true },
     { id: "user", group: "管理员", name: "用户管理", icon: "users", render: pageUsers, admin: true },
     { id: "redemption", group: "管理员", name: "兑换码", icon: "ticket", render: pageRedemptions, admin: true },
+    { id: "logs", group: "管理员", name: "全部日志", icon: "activity", render: pageAllLogs, admin: true },
     { id: "setting", group: "管理员", name: "系统设置", icon: "settings", admin: true, children: [
       { id: "setting/basic", name: "基础设置", render: pageSettingBasic },
       { id: "setting/login", name: "注册登录", render: pageSettingLogin },
@@ -873,22 +876,15 @@
   }
 
   // ---------------------------------------------------------------- 使用日志
-  async function pageLogs(root) {
-    const type = h("select", { class: "select" }, h("option", { value: "" }, "全部类型"),
-      Object.entries(LOG_TYPES).map(([v, [n]]) => h("option", { value: v }, n)));
-    const tokenName = h("input", { class: "input", placeholder: "令牌名称" });
-    const all = switchInput(false);
-    const username = h("input", { class: "input", placeholder: "用户名" });
-    const card = h("div", { class: "card" });
-    const adminTools = isAdmin() ? [h("label", { class: "field-row", style: "gap:8px" }, all.el, "全部用户"), username] : [];
-    root.append(pageHeader("使用日志", type, tokenName, ...adminTools,
-      h("button", { class: "btn primary", type: "button", onclick: () => reload(1).catch((e) => toast(e.message, true)) }, "查询")), card);
-    const columns = () => [
+  // 日志表格的列;全部日志页多出用户和渠道两列
+  function logColumns({ user = false, channel = null } = {}) {
+    return [
       { title: "时间", render: (l) => h("span", { class: "mono" }, fmtTime(l.created_at)) },
-      ...(isAdmin() && all.input.checked ? [{ title: "用户", render: (l) => l.username }] : []),
+      ...(user ? [{ title: "用户", render: (l) => l.username }] : []),
       { title: "令牌", render: (l) => l.token_name || "—" },
       { title: "类型", render: (l) => { const [n, c] = LOG_TYPES[l.type] || ["未知", ""]; return tag(n, c); } },
       { title: "站点", render: (l) => l.host || "—" },
+      ...(channel ? [{ title: "渠道", render: channel }] : []),
       { title: "耗时", render: (l) => (l.elapsed == null ? "—" : tag(`${Number(l.elapsed).toFixed(1)}s`, l.elapsed < 25 ? "green" : l.elapsed < 45 ? "orange" : "red")) },
       { title: "积分", num: true, render: (l) => {
         if (!l.quota) return "—";
@@ -898,16 +894,78 @@
       } },
       { title: "详情", wrap: true, render: (l) => h("span", { class: l.type === 5 ? "err-text" : "t2" }, l.content) },
     ];
+  }
+
+  function typeSelect(extra = []) {
+    return h("select", { class: "select" }, h("option", { value: "" }, "全部类型"), extra,
+      Object.entries(LOG_TYPES).map(([v, [n]]) => h("option", { value: v }, n)));
+  }
+
+  async function pageLogs(root) {
+    const type = typeSelect();
+    const tokenName = h("input", { class: "input", placeholder: "令牌名称" });
+    const card = h("div", { class: "card" });
+    root.append(pageHeader("使用日志", type, tokenName,
+      h("button", { class: "btn primary", type: "button", onclick: () => reload(1).catch((e) => toast(e.message, true)) }, "查询")), card);
     let p = 1;
     const reload = async (page = p) => {
       p = page;
       const q = new URLSearchParams({ p, size: PAGE_SIZE, type: type.value, token_name: tokenName.value.trim() });
-      if (isAdmin() && all.input.checked) { q.set("scope", "all"); if (username.value.trim()) q.set("username", username.value.trim()); }
       const data = await api("GET", `/api/log?${q}`);
-      card.replaceChildren(table(columns(), data.items), pager(data.total, data.p, data.size, (n) => reload(n).catch((e) => toast(e.message, true))));
+      card.replaceChildren(table(logColumns(), data.items), pager(data.total, data.p, data.size, (n) => reload(n).catch((e) => toast(e.message, true))));
     };
     type.addEventListener("change", () => reload(1).catch((e) => toast(e.message, true)));
-    all.input.addEventListener("change", () => reload(1).catch((e) => toast(e.message, true)));
+    await reload(1);
+  }
+
+  // 管理员:所有用户的日志。默认只看求解(成功与失败),注册赠送、签到等系统日志很多
+  async function pageAllLogs(root) {
+    const type = typeSelect(h("option", { value: "2,5", selected: true }, "求解(成功与失败)"));
+    type.value = "2,5";
+    const username = h("input", { class: "input", placeholder: "用户名" });
+    const tokenName = h("input", { class: "input", placeholder: "令牌名称" });
+    const host = h("input", { class: "input", placeholder: "站点" });
+    const summary = h("div", { class: "two" });
+    const card = h("div", { class: "card" });
+    const run = () => reload(1).catch((e) => toast(e.message, true));
+    for (const input of [username, tokenName, host]) input.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+    root.append(pageHeader("全部日志", type, username, tokenName, host,
+      h("button", { class: "btn primary", type: "button", onclick: run }, "查询")), summary, card);
+
+    // 渠道:taskId 第一位是位置序号;同步 /solve 没有 taskId
+    const names = {};
+    try { for (const ch of (await api("GET", "/api/admin/channels")).items) names[ch.slot] = ch.name; } catch {}
+    const channel = (l) => {
+      const slot = l.task_id ? SLOT_ORDER[parseInt(String(l.task_id).charAt(0), 16)] : null;
+      if (!slot) return "—";
+      return h("span", { class: "toolbar", style: "gap:6px;flex-wrap:nowrap" },
+        h("span", { class: "slot-badge", style: "width:22px;height:22px;font-size:12px" }, slot), names[slot] || null);
+    };
+
+    const pick = (input, value) => { input.value = value || ""; type.value = "2,5"; run(); };
+    const topCard = (title, rows, input) => h("div", { class: "card" },
+      h("div", { class: "card-hd" }, h("h3", {}, title)),
+      table([
+        { title: input === username ? "用户" : "站点", render: (r) => (r.name ? h("button", { class: "btn link", type: "button", onclick: () => pick(input, r.name) }, r.name) : "—") },
+        { title: "成功", num: true, render: (r) => num(r.ok) },
+        { title: "失败", num: true, render: (r) => h("span", { class: r.fail ? "neg" : null }, num(r.fail)) },
+      ], rows.filter((r) => r.fail > 0), "24 小时内没有失败"));
+    try {
+      const s = await api("GET", "/api/admin/log/summary?hours=24");
+      summary.replaceChildren(topCard(`失败最多的用户 · 24 小时成功 ${num(s.ok)}、失败 ${num(s.fail)}`, s.users, username),
+        topCard("失败最多的站点 · 24 小时", s.hosts, host));
+    } catch (err) { summary.replaceChildren(); }
+
+    let p = 1;
+    const reload = async (page = p) => {
+      p = page;
+      const q = new URLSearchParams({ p, size: PAGE_SIZE, scope: "all", type: type.value });
+      for (const [k, input] of [["username", username], ["token_name", tokenName], ["host", host]]) if (input.value.trim()) q.set(k, input.value.trim());
+      const data = await api("GET", `/api/log?${q}`);
+      card.replaceChildren(table(logColumns({ user: true, channel }), data.items),
+        pager(data.total, data.p, data.size, (n) => reload(n).catch((e) => toast(e.message, true))));
+    };
+    type.addEventListener("change", run);
     await reload(1);
   }
 
