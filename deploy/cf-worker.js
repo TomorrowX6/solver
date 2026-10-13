@@ -47,6 +47,36 @@ function badTarget(rt, websiteURL, sitekey) {
 const OFFLINE_STATUS = new Set([502, 521, 522, 523, 530]);
 const offlineUntil = new Map();
 
+// 同一用户同一站点当天(北京时间)失败超过 host_error_limit 次后,新请求直接返回 429,不再占用 worker
+// (例如客户端不停重试一个从 worker 打不开的站点)。worker 下线导致的 ERROR_TASKID_INVALID 不算。
+// 被拦下的请求不记日志;拦截结果在本实例缓存到当天结束,修改上限后重新判断
+const errorBlocks = new Map();
+const chinaDayStart = (t) => Math.floor((t + 8 * 3600) / 86400) * 86400 - 8 * 3600;
+
+async function overErrorLimit(env, userId, host, limit) {
+  if (!limit || !host) return false;
+  const t = now();
+  const key = `${userId}|${host}`;
+  const cached = errorBlocks.get(key);
+  if (cached && cached.until > t && cached.limit === limit) return true;
+  const dayStart = chinaDayStart(t);
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM (SELECT 1 FROM logs WHERE type = 5 AND user_id = ? AND host = ? AND created_at >= ?
+       AND content NOT LIKE 'ERROR_TASKID_INVALID%' LIMIT ?)`,
+  ).bind(userId, host, dayStart, limit + 1).first();
+  if (row.n <= limit) return false;
+  errorBlocks.set(key, { until: dayStart + 86400, limit });
+  return true;
+}
+
+function tooManyErrors(limit, taskApi) {
+  const message = `该站点今天已失败超过 ${limit} 次，暂停接收到北京时间明天 0 点`;
+  const headers = { "retry-after": String(chinaDayStart(now()) + 86400 - now()) };
+  return taskApi
+    ? Response.json({ errorId: 1, errorCode: "ERROR_TOO_MUCH_REQUESTS", errorDescription: message }, { status: 429, headers })
+    : Response.json({ status: "error", message, code: "too_many_errors" }, { status: 429, headers });
+}
+
 // 控制台页面不含任何密钥;禁止被嵌入,只允许请求本域名
 const ADMIN_PAGE_HEADERS = {
   "content-type": "text/html; charset=utf-8",
@@ -253,7 +283,10 @@ async function billedCreateTask(rt, payload, auth, root) {
   const task = payload.task || {};
   const bad = badTarget(rt, task.websiteURL || task.websiteUrl, task.websiteKey);
   if (bad) return taskError("ERROR_INVALID_TASK_DATA", bad);
-  const cost = intOption(await getOptions(rt.env), "price_turnstile");
+  const options = await getOptions(rt.env);
+  const limit = intOption(options, "host_error_limit");
+  if (await overErrorLimit(rt.env, auth.user.id, hostname(task.websiteURL || task.websiteUrl), limit)) return tooManyErrors(limit, true);
+  const cost = intOption(options, "price_turnstile");
   const denied = await reserve(rt.env, auth, cost);
   if (denied) return taskError("ERROR_ZERO_BALANCE", denied);
   const resp = await rt.createTask(JSON.stringify({ ...payload, clientKey: root }));
@@ -364,8 +397,11 @@ async function relayBilled(rt, root, body) {
     if (payload.proxy != null && payload.proxy !== "") return error(422, "invalid_request", "不支持 proxy，Turnstile 由服务端直接求解，请去掉该字段");
     const bad = badTarget(rt, payload.url, payload.sitekey);
     if (bad) return error(422, "invalid_request", bad.replace("websiteKey", "sitekey").replace("websiteURL", "url"));
+    const options = await getOptions(env);
+    const limit = intOption(options, "host_error_limit");
+    if (await overErrorLimit(env, auth.user.id, hostname(payload.url), limit)) return tooManyErrors(limit, false);
     return billedSync(rt, body, auth, root, {
-      cost: intOption(await getOptions(env), "price_turnstile"),
+      cost: intOption(options, "price_turnstile"),
       content: "Turnstile(同步)",
       host: hostname(payload.url),
       elapsedOf: (d) => d.elapsed,

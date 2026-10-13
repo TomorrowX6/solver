@@ -1222,6 +1222,7 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
           ["ERROR_TASK_NOT_SUPPORTED", "不支持的任务类型(包括带代理的 TurnstileTask)"],
           ["ERROR_INVALID_TASK_DATA", "缺少 websiteURL / websiteKey，websiteURL 不是 http(s) 网址，或 websiteKey 不是 Turnstile sitekey"],
           ["ERROR_NO_SLOT_AVAILABLE", "繁忙，稍后重试"],
+          ["ERROR_TOO_MUCH_REQUESTS", "同一站点今天失败次数过多，暂停到北京时间明天 0 点(HTTP 429)"],
           ["ERROR_TASKID_INVALID", "taskId 不存在或已过期"],
           ["ERROR_CAPTCHA_UNSOLVABLE", "求解失败(sitekey 与网址不匹配、目标页面在 5 秒盾之后、超时等)，不扣积分"],
           ["ERROR_SERVICE_UNAVALIABLE", "服务暂不可用，稍后重试"],
@@ -1232,7 +1233,7 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
           ["401", "缺少或错误的令牌"],
           ["402", "积分或令牌额度不足"],
           ["422", "参数校验失败，Turnstile 返回错误(sitekey 与域名不匹配)，或目标页面在 5 秒盾之后"],
-          ["429", "繁忙，稍后重试"],
+          ["429", "繁忙，稍后重试；code 为 too_many_errors 时表示同一站点今天失败次数过多，暂停到北京时间明天 0 点"],
           ["500", "求解失败或超时，不扣积分"],
           ["503", "服务暂不可用，稍后重试"],
         ])),
@@ -1243,6 +1244,7 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
           ["提示目标页面在 5 秒盾之后", "组件要在目标域名的页面上渲染，而该站点的页面都要先通过 Cloudflare 验证页，这类站点无法求解"],
           ["站点校验 UA", "提交时使用 solution.userAgent(Turnstile 不支持代理，求解不经过你的出口 IP)"],
           ["失败会扣积分吗", "不会。失败、超时、10 分钟内未取结果的任务都会自动退还"],
+          ["返回 429 / ERROR_TOO_MUCH_REQUESTS", "同一站点当天失败次数过多(通常是该站点无法求解)，请先检查网址与 sitekey；北京时间 0 点后自动恢复"],
           ["返回繁忙", "当前所有求解名额已满，稍后重试；负载高时会自动增加机器，约 2–3 分钟生效"],
         ])),
     ]);
@@ -1579,9 +1581,11 @@ solve("https://example.com/login", "0x4AAAAAAA...").then(console.log);`,
     const o = await api("GET", "/api/admin/option");
     const name = h("input", { class: "input", value: o.system_name, maxlength: 30 });
     const price = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.price_turnstile });
+    const errorLimit = h("input", { class: "input", type: "number", min: 0, step: 1, value: o.host_error_limit });
     root.append(pageHeader("基础设置"), h("div", { class: "narrow" }, settingCard("基础",
-      [field("系统名称", name), field("求解价格", price, "积分 / 次，成功才扣")],
-      () => ({ system_name: name.value.trim(), price_turnstile: Number(price.value) }),
+      [field("系统名称", name), field("求解价格", price, "积分 / 次，成功才扣"),
+        field("单站点每日失败上限", errorLimit, "同一用户在同一站点当天(北京时间)失败超过这个次数后，新请求直接返回 429，第二天恢复；0 表示不限")],
+      () => ({ system_name: name.value.trim(), price_turnstile: Number(price.value), host_error_limit: Number(errorLimit.value) }),
       (saved) => {
         sys.system_name = saved.system_name;
         sys.price_turnstile = Number(saved.price_turnstile);
